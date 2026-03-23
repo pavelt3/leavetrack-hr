@@ -1,0 +1,142 @@
+@import url('https://fonts.googleapis.com/css2?family=Barlow:ital,wght@0,300;0,400;0,500;0,600;1,300&family=Barlow+Condensed:wght@300;400;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Lucent Renewables palette:
+       Dark navy/charcoal backgrounds, teal/cyan accent, warm earthy tones */
+    --background: 210 18% 97%;
+    --foreground: 215 30% 12%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 215 30% 12%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 215 30% 12%;
+
+    /* Teal accent from the concentric-ring logo */
+    --primary: 196 72% 35%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 210 16% 93%;
+    --secondary-foreground: 215 25% 20%;
+
+    --muted: 210 14% 94%;
+    --muted-foreground: 215 14% 52%;
+
+    --accent: 196 40% 90%;
+    --accent-foreground: 196 72% 25%;
+
+    --destructive: 0 68% 50%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 214 14% 88%;
+    --input: 214 14% 88%;
+    --ring: 196 72% 35%;
+
+    --radius: 0.375rem;
+
+    /* Sidebar — dark navy matching Lucent's dark brand */
+    --sidebar-background: 218 38% 10%;
+    --sidebar-foreground: 210 20% 82%;
+    --sidebar-primary: 196 72% 45%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 218 32% 16%;
+    --sidebar-accent-foreground: 210 20% 95%;
+    --sidebar-border: 218 28% 15%;
+    --sidebar-ring: 196 72% 45%;
+
+    --chart-1: 196 72% 35%;
+    --chart-2: 142 60% 42%;
+    --chart-3: 37 85% 55%;
+    --chart-4: 0 68% 50%;
+    --chart-5: 217 85% 58%;
+  }
+
+  .dark {
+    --background: 218 38% 8%;
+    --foreground: 210 20% 90%;
+
+    --card: 218 32% 11%;
+    --card-foreground: 210 20% 90%;
+
+    --popover: 218 32% 11%;
+    --popover-foreground: 210 20% 90%;
+
+    --primary: 196 62% 48%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 218 28% 16%;
+    --secondary-foreground: 210 20% 78%;
+
+    --muted: 218 28% 14%;
+    --muted-foreground: 215 14% 54%;
+
+    --accent: 218 28% 16%;
+    --accent-foreground: 196 62% 65%;
+
+    --destructive: 0 60% 46%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 218 20% 20%;
+    --input: 218 20% 20%;
+    --ring: 196 62% 48%;
+
+    --sidebar-background: 218 42% 6%;
+    --sidebar-foreground: 210 20% 82%;
+    --sidebar-primary: 196 62% 48%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 218 34% 12%;
+    --sidebar-accent-foreground: 210 20% 90%;
+    --sidebar-border: 218 34% 12%;
+    --sidebar-ring: 196 62% 48%;
+
+    --chart-1: 196 62% 48%;
+    --chart-2: 142 55% 46%;
+    --chart-3: 37 85% 58%;
+    --chart-4: 0 62% 52%;
+    --chart-5: 217 80% 62%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'Barlow', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-weight: 400;
+    -webkit-font-smoothing: antialiased;
+  }
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Barlow Condensed', 'Barlow', sans-serif;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+  }
+}
+
+@layer components {
+  .status-badge {
+    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
+  }
+  .status-pending {
+    @apply bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400;
+  }
+  .status-approved {
+    @apply bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400;
+  }
+  .status-rejected {
+    @apply bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400;
+  }
+  .status-cancelled {
+    @apply bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400;
+  }
+  .leave-annual { @apply bg-cyan-100 text-cyan-800 dark:bg-cyan-900/30 dark:text-cyan-400; }
+  .leave-sick { @apply bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400; }
+  .leave-unpaid { @apply bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300; }
+  .leave-other { @apply bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400; }
+}
