@@ -217,7 +217,9 @@ export default function AuditLogPage() {
               <ShieldCheck size={36} className="text-muted-foreground/30 mb-3" />
               <p className="font-medium text-foreground">No events found</p>
               <p className="text-muted-foreground text-sm mt-1">
-                {typeFilter !== "all" || personFilter !== "all" || search ? "Try adjusting your filters" : "Events will appear here as actions are taken"}
+                {typeFilter !== "all" || personFilter !== "all" || search
+                  ? "Try adjusting your filters"
+                  : "Actions taken on the platform will appear here. Note: data seeded before launch has no audit trail — the log grows from real activity onwards."}
               </p>
             </div>
           ) : (

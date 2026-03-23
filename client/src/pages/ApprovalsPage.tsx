@@ -108,6 +108,11 @@ export default function ApprovalsPage() {
                       <span className="text-base" title={r.employee?.country}>
                         {COUNTRY_FLAG[r.employee?.country] || r.employee?.country}
                       </span>
+                      {r.employee?.department && (
+                        <span className="text-xs bg-muted text-muted-foreground px-1.5 py-0.5 rounded">
+                          {r.employee.department}
+                        </span>
+                      )}
                     </div>
                     <div className="flex items-center gap-4 text-sm flex-wrap">
                       <span className="flex items-center gap-1.5 font-medium">

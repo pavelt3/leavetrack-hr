@@ -10,7 +10,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { UserPlus, Copy, CheckCircle2, Edit2, UserX, Link2, ShieldCheck, Clock } from "lucide-react";
+import { UserPlus, Copy, CheckCircle2, Edit2, UserX, Link2, ShieldCheck, Clock, Search } from "lucide-react";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 
 // "none" is used as sentinel for Select — avoids wouter treating value="" as /# route
 const NONE = "none";
@@ -193,8 +194,14 @@ export default function PeoplePage() {
   // Link dialog — for generating/showing access links for existing users
   const [linkDialog, setLinkDialog] = useState<{ user: User; token: string } | null>(null);
   const [linkCopied, setLinkCopied] = useState(false);
+  // Deactivate confirmation
+  const [deactivateTarget, setDeactivateTarget] = useState<User | null>(null);
+  // Search filter
+  const [searchQuery, setSearchQuery] = useState("");
   // Allowance editing state (loaded when edit dialog opens)
-  const [editAllowance, setEditAllowance] = useState<{ usedDays: string; pendingDays: string } | null>(null);
+  const [editAllowance, setEditAllowance] = useState<{
+    usedDays: string; pendingDays: string; totalDays: string; carriedOverDays: string;
+  } | null>(null);
 
   const emptyInvite = {
     email: "", firstName: "", lastName: "", role: "employee",
@@ -207,6 +214,17 @@ export default function PeoplePage() {
   const { data: users = [], isLoading } = useQuery<User[]>({ queryKey: ["/api/users/all"] });
   const active = users.filter((u) => u.isActive);
   const currentYear = new Date().getFullYear();
+
+  const filteredActive = active.filter((u) => {
+    if (!searchQuery.trim()) return true;
+    const q = searchQuery.toLowerCase();
+    return (
+      `${u.firstName} ${u.lastName}`.toLowerCase().includes(q) ||
+      u.country.toLowerCase().includes(q) ||
+      (u.department || "").toLowerCase().includes(q) ||
+      u.email.toLowerCase().includes(q)
+    );
+  });
 
   // Fetch allowance for the user being edited
   const { data: editUserAllowanceData } = useQuery<any>({
@@ -222,12 +240,19 @@ export default function PeoplePage() {
   const saveAllowanceMutation = useMutation({
     mutationFn: async () => {
       if (!editUser || !editAllowance) return;
-      const res = await apiRequest("PUT", `/api/allowances/${editUser.id}/${currentYear}/used`, {
+      // Update total + carried (Settings-style endpoint)
+      const res1 = await apiRequest("PUT", `/api/allowances/${editUser.id}/${currentYear}`, {
+        totalDays: parseFloat(editAllowance.totalDays) || 0,
+        carriedOverDays: parseFloat(editAllowance.carriedOverDays) || 0,
+      });
+      if (!res1.ok) { const e = await res1.json(); throw new Error(e.error); }
+      // Update used + pending (People-style endpoint)
+      const res2 = await apiRequest("PUT", `/api/allowances/${editUser.id}/${currentYear}/used`, {
         usedDays: parseFloat(editAllowance.usedDays) || 0,
         pendingDays: parseFloat(editAllowance.pendingDays) || 0,
       });
-      if (!res.ok) { const e = await res.json(); throw new Error(e.error); }
-      return res.json();
+      if (!res2.ok) { const e = await res2.json(); throw new Error(e.error); }
+      return res2.json();
     },
     onError: (e: any) => toast({ title: "Error saving allowance", description: e.message, variant: "destructive" }),
   });
@@ -311,6 +336,8 @@ export default function PeoplePage() {
       setEditAllowance({
         usedDays: String(editUserAllowanceData.usedDays ?? 0),
         pendingDays: String(editUserAllowanceData.pendingDays ?? 0),
+        totalDays: String(editUserAllowanceData.totalDays ?? 25),
+        carriedOverDays: String(editUserAllowanceData.carriedOverDays ?? 0),
       });
     }
   }, [editUserAllowanceData, editOpen]);
@@ -370,16 +397,29 @@ export default function PeoplePage() {
 
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-base">{active.length} Active Team Member{active.length !== 1 ? "s" : ""}</CardTitle>
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <CardTitle className="text-base">{active.length} Active Team Member{active.length !== 1 ? "s" : ""}</CardTitle>
+            <div className="relative w-full sm:w-64">
+              <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                placeholder="Search name, country, department…"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-8 h-9 text-sm"
+              />
+            </div>
+          </div>
         </CardHeader>
         <CardContent>
           {isLoading ? (
             <div className="space-y-3">{[1,2,3].map(i=><div key={i} className="h-14 bg-muted rounded-lg animate-pulse"/>)}</div>
-          ) : active.length === 0 ? (
-            <p className="text-muted-foreground text-sm py-4 text-center">No team members yet.</p>
+          ) : filteredActive.length === 0 ? (
+            <p className="text-muted-foreground text-sm py-4 text-center">
+              {searchQuery ? "No team members match your search." : "No team members yet."}
+            </p>
           ) : (
             <div className="divide-y divide-border">
-              {active.map((u) => {
+              {filteredActive.map((u) => {
                 const initials = `${u.firstName[0]}${u.lastName[0]}`.toUpperCase();
                 const manager = users.find((m) => m.id === u.managerId);
                 return (
@@ -440,7 +480,7 @@ export default function PeoplePage() {
                         <Button
                           variant="ghost" size="sm"
                           className="text-muted-foreground hover:text-destructive h-8 w-8 p-0"
-                          onClick={(e) => { e.preventDefault(); e.stopPropagation(); deactivateMutation.mutate(u.id); }}
+                          onClick={(e) => { e.preventDefault(); e.stopPropagation(); setDeactivateTarget(u); }}
                           data-testid={`button-deactivate-${u.id}`}
                           title="Deactivate user"
                         >
@@ -537,6 +577,27 @@ export default function PeoplePage() {
         </DialogContent>
       </Dialog>
 
+      {/* ── Deactivate Confirmation ───────────────────────────────────────────── */}
+      <AlertDialog open={!!deactivateTarget} onOpenChange={(o) => !o && setDeactivateTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Deactivate {deactivateTarget?.firstName} {deactivateTarget?.lastName}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              They will be removed from the active team list and will no longer be able to log in. This can be reversed by contacting a database administrator.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive hover:bg-destructive/90 text-white"
+              onClick={() => { if (deactivateTarget) { deactivateMutation.mutate(deactivateTarget.id); setDeactivateTarget(null); } }}
+            >
+              Deactivate
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       <Dialog open={editOpen} onOpenChange={(o) => { setEditOpen(o); if (!o) { setEditUser(null); setEditAllowance(null); } }}>
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
@@ -560,16 +621,49 @@ export default function PeoplePage() {
               users={active.filter((u) => u.id !== editUser?.id)}
             />
 
-            {/* Used days override — admin only */}
+            {/* Allowance override — admin only */}
             <div className="border rounded-md p-3 space-y-3 bg-muted/20">
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Holiday days ({new Date().getFullYear()}) — manual override</p>
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Annual leave allowance ({new Date().getFullYear()}) — manual override</p>
               <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label>Annual entitlement (days)</Label>
+                  <Input
+                    type="number" min="0" max="365" step="0.5"
+                    value={editAllowance?.totalDays ?? (editUserAllowanceData?.totalDays ?? "")}
+                    onChange={(e) => setEditAllowance((a) => ({
+                      totalDays: e.target.value,
+                      carriedOverDays: a?.carriedOverDays ?? String(editUserAllowanceData?.carriedOverDays ?? 0),
+                      usedDays: a?.usedDays ?? String(editUserAllowanceData?.usedDays ?? 0),
+                      pendingDays: a?.pendingDays ?? String(editUserAllowanceData?.pendingDays ?? 0),
+                    }))}
+                    placeholder="25"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Carried-over days</Label>
+                  <Input
+                    type="number" min="0" max="365" step="0.5"
+                    value={editAllowance?.carriedOverDays ?? (editUserAllowanceData?.carriedOverDays ?? "")}
+                    onChange={(e) => setEditAllowance((a) => ({
+                      totalDays: a?.totalDays ?? String(editUserAllowanceData?.totalDays ?? 25),
+                      carriedOverDays: e.target.value,
+                      usedDays: a?.usedDays ?? String(editUserAllowanceData?.usedDays ?? 0),
+                      pendingDays: a?.pendingDays ?? String(editUserAllowanceData?.pendingDays ?? 0),
+                    }))}
+                    placeholder="0"
+                  />
+                </div>
                 <div className="space-y-1.5">
                   <Label>Used days</Label>
                   <Input
                     type="number" min="0" max="365" step="0.5"
                     value={editAllowance?.usedDays ?? (editUserAllowanceData?.usedDays ?? "")}
-                    onChange={(e) => setEditAllowance((a) => ({ usedDays: e.target.value, pendingDays: a?.pendingDays ?? String(editUserAllowanceData?.pendingDays ?? 0) }))}
+                    onChange={(e) => setEditAllowance((a) => ({
+                      totalDays: a?.totalDays ?? String(editUserAllowanceData?.totalDays ?? 25),
+                      carriedOverDays: a?.carriedOverDays ?? String(editUserAllowanceData?.carriedOverDays ?? 0),
+                      usedDays: e.target.value,
+                      pendingDays: a?.pendingDays ?? String(editUserAllowanceData?.pendingDays ?? 0),
+                    }))}
                     placeholder="0"
                   />
                 </div>
@@ -578,12 +672,17 @@ export default function PeoplePage() {
                   <Input
                     type="number" min="0" max="365" step="0.5"
                     value={editAllowance?.pendingDays ?? (editUserAllowanceData?.pendingDays ?? "")}
-                    onChange={(e) => setEditAllowance((a) => ({ usedDays: a?.usedDays ?? String(editUserAllowanceData?.usedDays ?? 0), pendingDays: e.target.value }))}
+                    onChange={(e) => setEditAllowance((a) => ({
+                      totalDays: a?.totalDays ?? String(editUserAllowanceData?.totalDays ?? 25),
+                      carriedOverDays: a?.carriedOverDays ?? String(editUserAllowanceData?.carriedOverDays ?? 0),
+                      usedDays: a?.usedDays ?? String(editUserAllowanceData?.usedDays ?? 0),
+                      pendingDays: e.target.value,
+                    }))}
                     placeholder="0"
                   />
                 </div>
               </div>
-              <p className="text-xs text-muted-foreground">These figures override the counters directly. Use to correct data that was seeded rather than booked through the platform.</p>
+              <p className="text-xs text-muted-foreground">Directly overrides allowance counters. Use to correct figures that were seeded rather than booked through the platform.</p>
             </div>
 
             <div className="flex justify-end gap-2 pt-1">

@@ -157,7 +157,7 @@ export default function SettingsPage() {
                     <Select value={coYear} onValueChange={setCoYear}>
                       <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
-                        {["2024", "2025", "2026"].map((y) => <SelectItem key={y} value={y}>{y}</SelectItem>)}
+                        {[String(currentYear - 2), String(currentYear - 1), String(currentYear)].map((y) => <SelectItem key={y} value={y}>{y}</SelectItem>)}
                       </SelectContent>
                     </Select>
                   </div>

@@ -229,6 +229,17 @@ export function registerRoutes(httpServer: Server, app: Express) {
     return res.json(all.filter((u) => u.id === me.id || u.id === me.managerId));
   });
 
+  // Basic user list — id/name/country only — accessible to all authenticated users (for calendar)
+  app.get("/api/users/basic", requireAuth, (req, res) => {
+    const basics = storage.getActiveUsers().map((u) => ({
+      id: u.id,
+      firstName: u.firstName,
+      lastName: u.lastName,
+      country: u.country,
+    }));
+    res.json(basics);
+  });
+
   app.get("/api/users/all", requireAuth, requireRole("admin", "manager"), (req, res) => {
     const me = storage.getUserById(req.session.userId!)!;
     // Admins get inviteToken so they can copy/share links; managers do not
@@ -494,6 +505,9 @@ export function registerRoutes(httpServer: Server, app: Express) {
 
   app.post("/api/leave-requests", requireAuth, async (req, res) => {
     const { startDate, endDate, leaveType, note, halfDay } = req.body;
+    // Server-side past-date guard
+    const todayStr = new Date().toISOString().split("T")[0];
+    if (startDate < todayStr) return res.status(400).json({ error: "Start date cannot be in the past" });
     const user = storage.getUserById(req.session.userId!)!;
     const year = new Date(startDate).getFullYear();
     // Half-day: force endDate = startDate and days = 0.5
@@ -533,7 +547,16 @@ export function registerRoutes(httpServer: Server, app: Express) {
       });
     }
 
-    // Email manager
+    // Non-annual leave types auto-approve immediately (sick, home_office, unpaid, other)
+    const autoApproveTypes = ["sick", "home_office", "unpaid", "other"];
+    if (autoApproveTypes.includes(leaveType)) {
+      storage.updateLeaveRequest(request.id, { status: "approved" });
+      auditLog({ actorId: user.id, actorName: `${user.firstName} ${user.lastName}`, targetUserId: user.id, targetUserName: `${user.firstName} ${user.lastName}`, eventType: "leave_request", summary: `${user.firstName} ${user.lastName} logged ${leaveType === "home_office" ? "home office" : leaveType} (${halfDay ? "½ day" : `${days} day${days !== 1 ? "s" : ""}`}) — auto-approved`, detail: { leaveType, startDate, endDate: effectiveEnd, days, halfDay: !!halfDay, note: note || null, autoApproved: true } });
+      const autoApproved = storage.getLeaveRequestById(request.id)!;
+      return res.json(autoApproved);
+    }
+
+    // Annual leave — email manager to review
     if (manager) {
       try {
         await sendLeaveRequestEmail(
@@ -544,7 +567,7 @@ export function registerRoutes(httpServer: Server, app: Express) {
       } catch (e) { console.error(e); }
     }
 
-    auditLog({ actorId: user.id, actorName: `${user.firstName} ${user.lastName}`, targetUserId: user.id, targetUserName: `${user.firstName} ${user.lastName}`, eventType: "leave_request", summary: `${user.firstName} ${user.lastName} submitted ${leaveType === "home_office" ? "home office" : leaveType} request (${halfDay ? "½ day" : `${days} day${days !== 1 ? "s" : ""}`})`, detail: { leaveType, startDate, endDate: effectiveEnd, days, halfDay: !!halfDay, note: note || null } });
+    auditLog({ actorId: user.id, actorName: `${user.firstName} ${user.lastName}`, targetUserId: user.id, targetUserName: `${user.firstName} ${user.lastName}`, eventType: "leave_request", summary: `${user.firstName} ${user.lastName} submitted ${leaveType} leave request (${halfDay ? "½ day" : `${days} day${days !== 1 ? "s" : ""}`})`, detail: { leaveType, startDate, endDate: effectiveEnd, days, halfDay: !!halfDay, note: note || null } });
     res.json(request);
   });
 
@@ -596,15 +619,25 @@ export function registerRoutes(httpServer: Server, app: Express) {
     const request = storage.getLeaveRequestById(id);
     if (!request) return res.status(404).json({ error: "Not found" });
     if (request.userId !== req.session.userId) return res.status(403).json({ error: "Forbidden" });
-    if (request.status !== "pending") return res.status(400).json({ error: "Can only cancel pending requests" });
+    const todayStr = new Date().toISOString().split("T")[0];
+    const canCancel =
+      request.status === "pending" ||
+      (request.status === "approved" && request.startDate >= todayStr);
+    if (!canCancel) return res.status(400).json({ error: "Cannot cancel leave that has already started or been rejected/cancelled" });
 
     storage.updateLeaveRequest(id, { status: "cancelled" });
-    // Only restore pending days for annual leave
+    // Restore allowance counters for annual leave
     if (request.leaveType === "annual") {
       const allowance = storage.ensureAllowance(request.userId, request.year);
-      storage.updateAllowance(request.userId, request.year, {
-        pendingDays: Math.max(0, allowance.pendingDays - request.days),
-      });
+      if (request.status === "pending") {
+        storage.updateAllowance(request.userId, request.year, {
+          pendingDays: Math.max(0, allowance.pendingDays - request.days),
+        });
+      } else if (request.status === "approved") {
+        storage.updateAllowance(request.userId, request.year, {
+          usedDays: Math.max(0, allowance.usedDays - request.days),
+        });
+      }
     }
     const canceller = storage.getUserById(req.session.userId!)!;
     auditLog({ actorId: canceller.id, actorName: `${canceller.firstName} ${canceller.lastName}`, targetUserId: request.userId, targetUserName: `${canceller.firstName} ${canceller.lastName}`, eventType: "leave_cancelled", summary: `${canceller.firstName} ${canceller.lastName} cancelled ${request.leaveType === "home_office" ? "home office" : request.leaveType} request (${request.days} day${request.days !== 1 ? "s" : ""})`, detail: { leaveType: request.leaveType, startDate: request.startDate, endDate: request.endDate, days: request.days } });

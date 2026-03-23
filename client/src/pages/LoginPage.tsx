@@ -114,6 +114,9 @@ export default function LoginPage() {
             <p className="text-center text-xs text-slate-500 mt-4">
               New to the platform? You'll receive an invite link from your administrator.
             </p>
+            <p className="text-center text-xs text-slate-500 mt-2">
+              Forgotten your password? Contact your administrator — they can generate a new access link for you from the People page.
+            </p>
           </CardContent>
         </Card>
 

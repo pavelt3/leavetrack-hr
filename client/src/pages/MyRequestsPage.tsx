@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -39,11 +39,20 @@ function formatDateRange(start: string, end: string) {
 export default function MyRequestsPage() {
   const { toast } = useToast();
   const [statusFilter, setStatusFilter] = useState("all");
+  const [yearFilter, setYearFilter] = useState("all");
   const [cancelId, setCancelId] = useState<number | null>(null);
+
+  const today = format(new Date(), "yyyy-MM-dd");
 
   const { data: requests = [], isLoading } = useQuery<any[]>({
     queryKey: ["/api/leave-requests/me"],
   });
+
+  // Collect distinct years for filter
+  const years = useMemo(() => {
+    const ys = new Set(requests.map((r) => String(r.year ?? new Date(r.startDate).getFullYear())));
+    return Array.from(ys).sort().reverse();
+  }, [requests]);
 
   const cancelMutation = useMutation({
     mutationFn: async (id: number) => {
@@ -63,7 +72,11 @@ export default function MyRequestsPage() {
     },
   });
 
-  const filtered = requests.filter((r) => statusFilter === "all" || r.status === statusFilter);
+  const filtered = requests.filter((r) => {
+    if (statusFilter !== "all" && r.status !== statusFilter) return false;
+    if (yearFilter !== "all" && String(r.year ?? new Date(r.startDate).getFullYear()) !== yearFilter) return false;
+    return true;
+  });
   const sorted = [...filtered].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
   return (
@@ -73,7 +86,7 @@ export default function MyRequestsPage() {
           <h1 className="text-2xl font-bold text-foreground">My Requests</h1>
           <p className="text-muted-foreground text-sm mt-1">All your leave request history</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <Filter size={16} className="text-muted-foreground" />
           <Select value={statusFilter} onValueChange={setStatusFilter}>
             <SelectTrigger className="w-36" data-testid="filter-status">
@@ -85,6 +98,17 @@ export default function MyRequestsPage() {
               <SelectItem value="approved">Approved</SelectItem>
               <SelectItem value="rejected">Rejected</SelectItem>
               <SelectItem value="cancelled">Cancelled</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={yearFilter} onValueChange={setYearFilter}>
+            <SelectTrigger className="w-28" data-testid="filter-year">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All years</SelectItem>
+              {years.map((y) => (
+                <SelectItem key={y} value={y}>{y}</SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </div>
@@ -142,7 +166,7 @@ export default function MyRequestsPage() {
                     </p>
                   )}
                 </div>
-                {r.status === "pending" && (
+                {(r.status === "pending" || (r.status === "approved" && r.startDate >= today)) && (
                   <Button
                     variant="ghost"
                     size="sm"
@@ -167,7 +191,7 @@ export default function MyRequestsPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Cancel this request?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will cancel your pending leave request and the days will be returned to your allowance.
+              This will cancel your leave request and return the days to your allowance.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

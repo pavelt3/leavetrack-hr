@@ -196,12 +196,12 @@ export default function DashboardPage() {
                 <div className="w-8 h-8 bg-green-100 dark:bg-green-900/30 rounded-lg flex items-center justify-center flex-shrink-0">
                   <TrendingUp size={16} className="text-green-700 dark:text-green-400" />
                 </div>
-                <span className="text-muted-foreground text-xs font-medium leading-tight">Approved This Year</span>
+                <span className="text-muted-foreground text-xs font-medium leading-tight">Annual Leave Taken</span>
               </div>
               <div className="text-3xl font-bold text-foreground">
                 {myRequests.filter((r) => r.status === "approved" && r.year === year && r.leaveType === "annual").reduce((a, b) => a + b.days, 0).toFixed(1)}
               </div>
-              <p className="text-muted-foreground text-xs mt-0.5">days taken</p>
+              <p className="text-muted-foreground text-xs mt-0.5">days this year (annual only)</p>
             </CardContent>
           </Card>
 

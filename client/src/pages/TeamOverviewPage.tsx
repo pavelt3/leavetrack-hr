@@ -83,7 +83,7 @@ export default function TeamOverviewPage() {
       return nameA.localeCompare(nameB);
     });
 
-  const years = ["2025", "2026", "2027"];
+  const years = [String(currentYear - 1), String(currentYear), String(currentYear + 1), String(currentYear + 2)];
 
   const totalTeamDays = enriched.reduce((acc, a) => acc + a.usedDays, 0);
   const totalSickDays = enriched.reduce((acc, a) => acc + a.sickDays, 0);
