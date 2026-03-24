@@ -15,8 +15,9 @@ test("people page lists all active team members", async ({ page }) => {
 test("search filters the member list", async ({ page }) => {
   await page.fill("input[placeholder*='Search']", "Karen");
   await expect(page.locator("text=Karen Biesuz")).toBeVisible();
-  // Sidebar always shows the logged-in user — scope check to main content only
-  await expect(page.locator("main").locator("text=Pavel Tyle")).not.toBeVisible();
+  // "Reports to Pavel Tyle" still appears in Karen's row, so scope to the
+  // name span specifically — not the sub-text details line
+  await expect(page.locator("span.font-medium.text-sm", { hasText: "Pavel Tyle" })).not.toBeVisible();
 });
 
 test("leave history dialog opens and closes", async ({ page }) => {

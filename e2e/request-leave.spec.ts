@@ -35,10 +35,11 @@ test("picking both dates shows working-day preview", async ({ page }) => {
 });
 
 test("half-day toggle hides end date and updates banner", async ({ page }) => {
-  // Enable half-day
+  // Fill date first (while half-day is off) so React state is set,
+  // then toggle half-day — avoids re-render swallowing the fill event
+  await page.fill("#start-date", "2026-08-03");
   await page.click("button[role=switch]");
   await expect(page.locator("#end-date")).not.toBeVisible();
-  await page.fill("#start-date", "2026-08-03");
   await expect(page.locator("text=half a day (0.5)")).toBeVisible();
 });
 
