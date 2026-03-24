@@ -39,13 +39,13 @@ export default function RequestLeavePage() {
     queryKey: [`/api/holidays?year=${year}&country=${user?.country}`],
   });
 
+  const holidaySet = new Set(holidays.map((h: any) => h.date));
+
   // Feature 1: Query for overlap warnings
   const { data: overlaps = [] } = useQuery<any[]>({
     queryKey: [`/api/leave-requests/overlap?startDate=${startDate}&endDate=${endDate}`],
     enabled: !!(startDate && endDate && !halfDay && estimateDays(startDate, endDate) > 0),
   });
-
-  const holidaySet = new Set(holidays.map((h: any) => h.date));
   const isHomeOffice = leaveType === "home_office";
   const currentType = LEAVE_TYPES.find((t) => t.value === leaveType);
   const canHalfDay = currentType?.halfDayOk ?? false;
