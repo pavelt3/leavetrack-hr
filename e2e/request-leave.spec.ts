@@ -5,7 +5,7 @@
  */
 import { test, expect } from "@playwright/test";
 
-test.use({ storageState: ".auth/admin.json" });
+
 
 test.beforeEach(async ({ page }) => {
   await page.goto("/#/request");
@@ -39,20 +39,19 @@ test("half-day toggle hides end date and updates banner", async ({ page }) => {
   await page.click("button[role=switch]");
   await expect(page.locator("#end-date")).not.toBeVisible();
   await page.fill("#start-date", "2026-08-03");
-  await expect(page.locator("text=half a day")).toBeVisible();
+  await expect(page.locator("text=half a day (0.5)")).toBeVisible();
 });
 
 test("switching to Sick Leave keeps half-day option", async ({ page }) => {
-  await page.selectOption
-  // Use Radix Select — click trigger then option
+  // Radix Select renders options as [role="option"] in a floating portal
   await page.click("[data-testid=select-leave-type]");
-  await page.click("text=Sick Leave");
+  await page.getByRole("option", { name: "Sick Leave" }).click();
   await expect(page.locator("button[role=switch]")).toBeVisible();
 });
 
 test("switching to Unpaid Leave hides half-day toggle", async ({ page }) => {
   await page.click("[data-testid=select-leave-type]");
-  await page.click("text=Unpaid Leave");
+  await page.getByRole("option", { name: "Unpaid Leave" }).click();
   await expect(page.locator("button[role=switch]")).not.toBeVisible();
 });
 
