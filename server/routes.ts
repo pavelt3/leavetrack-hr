@@ -562,7 +562,7 @@ export function registerRoutes(httpServer: Server, app: Express) {
         const origManager = storage.getUserById(r.managerId);
         delegatedFromUser = origManager ? { firstName: origManager.firstName, lastName: origManager.lastName } : null;
       }
-      const result: any = { ...r, employee: u ? { firstName: u.firstName, lastName: u.lastName, email: u.email, country: u.country } : null };
+      const result: any = { ...r, employee: u ? { firstName: u.firstName, lastName: u.lastName, email: u.email, country: u.country, department: u.department } : null };
       if (isDelegated) {
         result.isDelegated = true;
         result.delegatedFrom = delegatedFromUser;
@@ -790,7 +790,7 @@ export function registerRoutes(httpServer: Server, app: Express) {
     res.json(updated);
   });
 
-  app.put("/api/leave-requests/:id/cancel", requireAuth, (req, res) => {
+  app.put("/api/leave-requests/:id/cancel", requireAuth, async (req, res) => {
     const id = parseInt(req.params.id);
     const request = storage.getLeaveRequestById(id);
     if (!request) return res.status(404).json({ error: "Not found" });
@@ -1039,12 +1039,8 @@ export function registerRoutes(httpServer: Server, app: Express) {
     const me = storage.getUserById(req.session.userId!)!;
     const all = storage.getAllLeaveRequests().filter((r) => r.status === "approved" || r.status === "pending");
     const activeUsers = storage.getActiveUsers();
-    const visible = me.role === "admin"
-      ? all
-      : all.filter((r) => {
-          const u = activeUsers.find((u) => u.id === r.userId);
-          return u && (u.managerId === me.id || u.id === me.id || r.managerId === me.id);
-        });
+    // All authenticated users see the full team calendar (per requirements)
+  const visible = all;
     const enriched = visible.map((r) => {
       const u = activeUsers.find((u) => u.id === r.userId);
       return { ...r, employee: u ? { firstName: u.firstName, lastName: u.lastName } : null };
