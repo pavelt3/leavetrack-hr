@@ -52,36 +52,43 @@ import SettingsPage from "@/pages/SettingsPage";
 import AuditLogPage from "@/pages/AuditLogPage";
 import Layout from "@/components/Layout";
 import ProtectedRoute from "@/components/ProtectedRoute";
+import NotFound from "@/pages/not-found";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 
 export default function App() {
   return (
-    <QueryClientProvider client={queryClient}>
-      <AuthProvider>
-        <Router hook={useCleanHashLocation}>
-          <Switch>
-            <Route path="/login" component={LoginPage} />
-            <Route path="/accept-invite" component={AcceptInvitePage} />
-            <Route>
-              <ProtectedRoute>
-                <Layout>
-                  <Switch>
-                    <Route path="/" component={DashboardPage} />
-                    <Route path="/request" component={RequestLeavePage} />
-                    <Route path="/my-requests" component={MyRequestsPage} />
-                    <Route path="/approvals" component={ApprovalsPage} />
-                    <Route path="/team" component={TeamOverviewPage} />
-                    <Route path="/calendar" component={TeamCalendarPage} />
-                    <Route path="/people" component={PeoplePage} />
-                    <Route path="/audit" component={AuditLogPage} />
-                    <Route path="/settings" component={SettingsPage} />
-                  </Switch>
-                </Layout>
-              </ProtectedRoute>
-            </Route>
-          </Switch>
-        </Router>
-        <Toaster />
-      </AuthProvider>
-    </QueryClientProvider>
+    <ErrorBoundary>
+      <QueryClientProvider client={queryClient}>
+        <AuthProvider>
+          <Router hook={useCleanHashLocation}>
+            <Switch>
+              <Route path="/login" component={LoginPage} />
+              <Route path="/accept-invite" component={AcceptInvitePage} />
+              <Route>
+                <ProtectedRoute>
+                  <Layout>
+                    <ErrorBoundary>
+                      <Switch>
+                        <Route path="/" component={DashboardPage} />
+                        <Route path="/request" component={RequestLeavePage} />
+                        <Route path="/my-requests" component={MyRequestsPage} />
+                        <Route path="/approvals" component={ApprovalsPage} />
+                        <Route path="/team" component={TeamOverviewPage} />
+                        <Route path="/calendar" component={TeamCalendarPage} />
+                        <Route path="/people" component={PeoplePage} />
+                        <Route path="/audit" component={AuditLogPage} />
+                        <Route path="/settings" component={SettingsPage} />
+                        <Route component={NotFound} />
+                      </Switch>
+                    </ErrorBoundary>
+                  </Layout>
+                </ProtectedRoute>
+              </Route>
+            </Switch>
+          </Router>
+          <Toaster />
+        </AuthProvider>
+      </QueryClientProvider>
+    </ErrorBoundary>
   );
 }

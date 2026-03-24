@@ -272,12 +272,14 @@ class Storage implements IStorage {
 
   /**
    * Hard-reset all operational data while keeping users and public holidays.
-   * Clears: leave_requests, leave_allowances, carry_over_log, audit_log, sessions.
+   * Clears leave requests, carry-over log, audit log, and sessions.
+   * Allowance records are KEPT but usage counters (used/pending/carried) are zeroed
+   * so that every user's entitlement remains visible in Team Overview.
    */
   resetData() {
     sqlite.exec(`
       DELETE FROM leave_requests;
-      DELETE FROM leave_allowances;
+      UPDATE leave_allowances SET used_days = 0, pending_days = 0, carried_over_days = 0;
       DELETE FROM carry_over_log;
       DELETE FROM audit_log;
       DELETE FROM sessions;

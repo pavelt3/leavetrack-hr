@@ -49,45 +49,22 @@ function NavLink({ href, label, icon, badge }: NavItem) {
   );
 }
 
-export default function Layout({ children }: { children: ReactNode }) {
-  const { user, logout } = useAuth();
-  const [mobileOpen, setMobileOpen] = useState(false);
+// Defined outside Layout so React sees a stable component identity across renders
+interface SidebarContentProps {
+  navItems: NavItem[];
+  initials: string;
+  fullName: string;
+  role: string;
+  onLogout: () => void;
+}
 
-  const { data: pendingData } = useQuery<any[]>({
-    queryKey: ["/api/leave-requests/pending"],
-    enabled: user?.role === "admin" || user?.role === "manager",
-  });
-  const pendingCount = pendingData?.length || 0;
-
-  const navItems: NavItem[] = [
-    { href: "/", label: "Dashboard", icon: <LayoutDashboard size={18} /> },
-    { href: "/request", label: "Request Leave", icon: <CalendarDays size={18} /> },
-    { href: "/my-requests", label: "My Requests", icon: <Clock size={18} /> },
-    ...(user?.role !== "employee"
-      ? [{ href: "/approvals", label: "Approvals", icon: <CheckSquare size={18} />, badge: pendingCount, roles: ["admin", "manager"] }]
-      : []),
-    ...(user?.role !== "employee"
-      ? [{ href: "/team", label: "Team Overview", icon: <Users size={18} />, roles: ["admin", "manager"] }]
-      : []),
-    { href: "/calendar", label: "Team Calendar", icon: <CalendarRange size={18} /> },
-    ...(user?.role === "admin"
-      ? [{ href: "/people", label: "People", icon: <UserCog size={18} />, roles: ["admin"] }]
-      : []),
-    ...(user?.role === "admin"
-      ? [{ href: "/audit", label: "Audit Log", icon: <ShieldCheck size={18} />, roles: ["admin"] }]
-      : []),
-    { href: "/settings", label: "Settings", icon: <Settings size={18} /> },
-  ];
-
-  const initials = user ? `${user.firstName[0]}${user.lastName[0]}`.toUpperCase() : "?";
-  const fullName = user ? `${user.firstName} ${user.lastName}` : "";
-
-  const Sidebar = () => (
+function SidebarContent({ navItems, initials, fullName, role, onLogout }: SidebarContentProps) {
+  return (
     <div className="flex flex-col h-full">
       {/* Logo */}
       <div className="px-4 py-5 border-b border-sidebar-border">
         <div className="flex items-center gap-3">
-          {/* Lucent concentric-arc mark — traced from brand logo */}
+          {/* Lucent concentric-arc mark */}
           <svg viewBox="0 0 36 36" fill="none" className="w-9 h-9 flex-shrink-0" aria-hidden="true">
             <path d="M18 4 A14 14 0 1 1 4 18" stroke="#3a9ec2" strokeWidth="1.4" fill="none" strokeLinecap="round"/>
             <path d="M18 7 A11 11 0 1 1 7 18" stroke="#3a9ec2" strokeWidth="1.6" fill="none" strokeLinecap="round"/>
@@ -125,7 +102,7 @@ export default function Layout({ children }: { children: ReactNode }) {
               </Avatar>
               <div className="flex-1 min-w-0">
                 <div className="text-sidebar-foreground text-sm font-medium truncate">{fullName}</div>
-                <div className="text-sidebar-foreground/50 text-xs capitalize">{user?.role}</div>
+                <div className="text-sidebar-foreground/50 text-xs capitalize">{role}</div>
               </div>
               <ChevronDown size={14} className="text-sidebar-foreground/50 flex-shrink-0" />
             </button>
@@ -138,7 +115,7 @@ export default function Layout({ children }: { children: ReactNode }) {
               </Link>
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={logout} className="text-destructive focus:text-destructive">
+            <DropdownMenuItem onClick={onLogout} className="text-destructive focus:text-destructive">
               <LogOut size={14} className="mr-2" />
               Sign out
             </DropdownMenuItem>
@@ -147,6 +124,43 @@ export default function Layout({ children }: { children: ReactNode }) {
       </div>
     </div>
   );
+}
+
+export default function Layout({ children }: { children: ReactNode }) {
+  const { user, logout } = useAuth();
+  const [mobileOpen, setMobileOpen] = useState(false);
+
+  const { data: pendingData } = useQuery<any[]>({
+    queryKey: ["/api/leave-requests/pending"],
+    enabled: user?.role === "admin" || user?.role === "manager",
+  });
+  const pendingCount = pendingData?.length || 0;
+
+  const navItems: NavItem[] = [
+    { href: "/", label: "Dashboard", icon: <LayoutDashboard size={18} /> },
+    { href: "/request", label: "Request Leave", icon: <CalendarDays size={18} /> },
+    { href: "/my-requests", label: "My Requests", icon: <Clock size={18} /> },
+    ...(user?.role !== "employee"
+      ? [{ href: "/approvals", label: "Approvals", icon: <CheckSquare size={18} />, badge: pendingCount, roles: ["admin", "manager"] }]
+      : []),
+    ...(user?.role !== "employee"
+      ? [{ href: "/team", label: "Team Overview", icon: <Users size={18} />, roles: ["admin", "manager"] }]
+      : []),
+    { href: "/calendar", label: "Team Calendar", icon: <CalendarRange size={18} /> },
+    ...(user?.role === "admin"
+      ? [{ href: "/people", label: "People", icon: <UserCog size={18} />, roles: ["admin"] }]
+      : []),
+    ...(user?.role === "admin"
+      ? [{ href: "/audit", label: "Audit Log", icon: <ShieldCheck size={18} />, roles: ["admin"] }]
+      : []),
+    { href: "/settings", label: "Settings", icon: <Settings size={18} /> },
+  ];
+
+  const initials = user ? `${user.firstName[0]}${user.lastName[0]}`.toUpperCase() : "?";
+  const fullName = user ? `${user.firstName} ${user.lastName}` : "";
+  const role = user?.role ?? "";
+
+  const sidebarProps: SidebarContentProps = { navItems, initials, fullName, role, onLogout: logout };
 
   return (
     <div className="min-h-screen flex bg-background">
@@ -155,7 +169,7 @@ export default function Layout({ children }: { children: ReactNode }) {
         className="hidden lg:flex flex-col w-64 flex-shrink-0 fixed inset-y-0 left-0 z-40"
         style={{ backgroundColor: "hsl(var(--sidebar-background))" }}
       >
-        <Sidebar />
+        <SidebarContent {...sidebarProps} />
       </aside>
 
       {/* Mobile overlay */}
@@ -178,7 +192,7 @@ export default function Layout({ children }: { children: ReactNode }) {
             <X size={20} />
           </Button>
         </div>
-        <Sidebar />
+        <SidebarContent {...sidebarProps} />
       </aside>
 
       {/* Main */}
