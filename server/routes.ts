@@ -1,6 +1,8 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import type { Server } from "http";
 import session from "express-session";
+import fs from "fs";
+import path from "path";
 import { storage, getSqliteDb } from "./storage";
 import { seedHolidays, calcBusinessDays, generateToken, hashPassword, verifyPassword, isLegacyHash } from "./helpers";
 import {
@@ -8,7 +10,13 @@ import {
   sendLeaveRequestEmail,
   sendStatusUpdateEmail,
   sendReminderEmail,
+  sendCancellationEmail,
+  sendWeeklyDigestEmail,
 } from "./email";
+
+// Feature 5: Attachments directory setup
+const ATTACHMENTS_DIR = process.env.ATTACHMENTS_DIR || path.join(process.cwd(), "attachments");
+fs.mkdirSync(ATTACHMENTS_DIR, { recursive: true });
 
 // ── SQLite-backed session store (survives restarts, no extra packages needed) ─
 function createSQLiteSessionStore(db: ReturnType<typeof getSqliteDb>): session.Store {
@@ -323,6 +331,56 @@ export function registerRoutes(httpServer: Server, app: Express) {
     res.json({ inviteToken: token });
   });
 
+  // Feature 2: Approval delegation — get current delegation
+  app.get("/api/users/me/delegation", requireAuth, (req, res) => {
+    const me = storage.getUserById(req.session.userId!)!;
+    let delegateTo: any = null;
+    if (me.delegateApprovalsTo) {
+      delegateTo = storage.getUserById(me.delegateApprovalsTo);
+      if (delegateTo) {
+        const { passwordHash: _, inviteToken: __, ...safe } = delegateTo;
+        delegateTo = safe;
+      }
+    }
+    res.json({ delegateTo, delegateUntil: me.delegateUntil });
+  });
+
+  // Feature 2: Approval delegation — set or clear delegation
+  app.put("/api/users/me/delegation", requireAuth, (req, res) => {
+    const { delegateToId, delegateUntil } = req.body;
+    const me = storage.getUserById(req.session.userId!)!;
+    if (delegateToId && typeof delegateToId === "number") {
+      const delegateUser = storage.getUserById(delegateToId);
+      if (!delegateUser) return res.status(400).json({ error: "Delegate user not found" });
+    }
+    storage.updateUser(me.id, {
+      delegateApprovalsTo: delegateToId || null,
+      delegateUntil: delegateUntil || null,
+    });
+    const updated = storage.getUserById(me.id)!;
+    const { passwordHash: _, inviteToken: __, ...safe } = updated;
+    res.json(safe);
+  });
+
+  // Feature 4: Employee profile update
+  app.put("/api/users/me/profile", requireAuth, (req, res) => {
+    const { firstName, lastName, phone, emergencyContact, emergencyContactPhone } = req.body;
+    const me = storage.getUserById(req.session.userId!)!;
+
+    const updated = storage.updateUser(me.id, {
+      firstName: firstName || me.firstName,
+      lastName: lastName || me.lastName,
+      phone: phone || null,
+      emergencyContact: emergencyContact || null,
+      emergencyContactPhone: emergencyContactPhone || null,
+    });
+
+    if (!updated) return res.status(404).json({ error: "User not found" });
+
+    const { passwordHash: _, inviteToken: __, ...safe } = updated;
+    res.json(safe);
+  });
+
   // ── Leave Allowances ────────────────────────────────────────────────────────
 
   /**
@@ -476,15 +534,40 @@ export function registerRoutes(httpServer: Server, app: Express) {
   app.get("/api/leave-requests/pending", requireAuth, requireRole("admin", "manager"), (req, res) => {
     const me = storage.getUserById(req.session.userId!)!;
     let pending = storage.getPendingRequests();
+    const todayStr = new Date().toISOString().split("T")[0];
+
     if (me.role === "manager") {
-      // Only show requests assigned to this manager
-      pending = pending.filter((r) => r.managerId === me.id);
+      // Show requests assigned to this manager, plus delegated requests
+      const directRequests = pending.filter((r) => r.managerId === me.id);
+
+      // Find all users who delegated to me and whose delegation is still active
+      const allUsers = storage.getAllUsers();
+      const delegatingUsers = allUsers.filter((u) => u.delegateApprovalsTo === me.id && u.delegateUntil && u.delegateUntil >= todayStr);
+      const delegatingManagerIds = delegatingUsers.map((u) => u.id);
+
+      // Add requests from delegating managers
+      const delegatedRequests = pending.filter((r) => delegatingManagerIds.includes(r.managerId || -1));
+
+      pending = [...directRequests, ...delegatedRequests];
     }
-    // Enrich with user
+
+    // Enrich with user and delegation info
     const users = storage.getActiveUsers();
     const enriched = pending.map((r) => {
       const u = users.find((u) => u.id === r.userId);
-      return { ...r, employee: u ? { firstName: u.firstName, lastName: u.lastName, email: u.email, country: u.country } : null };
+      // Check if this request is delegated to me
+      const isDelegated = me.role === "manager" && r.managerId && r.managerId !== me.id;
+      let delegatedFromUser = null;
+      if (isDelegated) {
+        const origManager = storage.getUserById(r.managerId);
+        delegatedFromUser = origManager ? { firstName: origManager.firstName, lastName: origManager.lastName } : null;
+      }
+      const result: any = { ...r, employee: u ? { firstName: u.firstName, lastName: u.lastName, email: u.email, country: u.country } : null };
+      if (isDelegated) {
+        result.isDelegated = true;
+        result.delegatedFrom = delegatedFromUser;
+      }
+      return result;
     });
     res.json(enriched);
   });
@@ -571,6 +654,87 @@ export function registerRoutes(httpServer: Server, app: Express) {
     res.json(request);
   });
 
+  // Feature 7: On-behalf leave submission (admin/manager submit for team members)
+  app.post("/api/leave-requests/on-behalf", requireAuth, requireRole("admin", "manager"), async (req, res) => {
+    const { userId, startDate, endDate, leaveType, note, halfDay } = req.body;
+    const me = storage.getUserById(req.session.userId!)!;
+    const targetUser = storage.getUserById(userId);
+
+    if (!targetUser) return res.status(400).json({ error: "Target user not found" });
+
+    // Manager can only submit for their direct reports
+    if (me.role === "manager" && targetUser.managerId !== me.id) {
+      return res.status(403).json({ error: "Can only submit leave for your direct reports" });
+    }
+
+    const year = new Date(startDate).getFullYear();
+    const effectiveEnd = halfDay ? startDate : endDate;
+    const days = calcBusinessDays(startDate, effectiveEnd, targetUser.country, !!halfDay);
+
+    if (days <= 0) return res.status(400).json({ error: "No working days in selected range" });
+
+    // For admin, relax past-date restrictions
+    if (me.role === "manager") {
+      const todayStr = new Date().toISOString().split("T")[0];
+      if (startDate < todayStr) return res.status(400).json({ error: "Start date cannot be in the past" });
+    }
+
+    // Check allowance for annual leave
+    const allowance = storage.ensureAllowance(targetUser.id, year);
+    const countsAgainstAllowance = leaveType === "annual";
+    if (countsAgainstAllowance) {
+      const enriched = enrichAllowanceWithProRata(allowance, targetUser, year);
+      const remaining = enriched.proRataTotalDays + allowance.carriedOverDays - allowance.usedDays - allowance.pendingDays;
+      if (days > remaining) {
+        return res.status(400).json({ error: `Not enough days remaining for ${targetUser.firstName}` });
+      }
+    }
+
+    const manager = targetUser.managerId ? storage.getUserById(targetUser.managerId) : null;
+    const request = storage.createLeaveRequest({
+      userId: targetUser.id,
+      startDate,
+      endDate: effectiveEnd,
+      days,
+      leaveType: leaveType || "sick",
+      note: note || null,
+      managerId: manager?.id || null,
+      year,
+      halfDay: !!halfDay,
+    });
+
+    // Update allowance for annual leave
+    if (countsAgainstAllowance) {
+      storage.updateAllowance(targetUser.id, year, {
+        pendingDays: allowance.pendingDays + days,
+      });
+    }
+
+    // Auto-approve for admin/manager on-behalf submissions
+    storage.updateLeaveRequest(request.id, { status: "approved" });
+
+    if (countsAgainstAllowance) {
+      const updatedAllowance = storage.ensureAllowance(targetUser.id, year);
+      storage.updateAllowance(targetUser.id, year, {
+        usedDays: updatedAllowance.usedDays + days,
+        pendingDays: Math.max(0, updatedAllowance.pendingDays - days),
+      });
+    }
+
+    auditLog({
+      actorId: me.id,
+      actorName: `${me.firstName} ${me.lastName}`,
+      targetUserId: targetUser.id,
+      targetUserName: `${targetUser.firstName} ${targetUser.lastName}`,
+      eventType: "leave_approved",
+      summary: `${me.firstName} ${me.lastName} logged ${leaveType === "home_office" ? "home office" : leaveType} for ${targetUser.firstName} ${targetUser.lastName} on behalf (${halfDay ? "½ day" : `${days} day${days !== 1 ? "s" : ""}`})`,
+      detail: { leaveType, startDate, endDate: effectiveEnd, days, halfDay: !!halfDay, note: note || null, onBehalf: true },
+    });
+
+    const finalRequest = storage.getLeaveRequestById(request.id)!;
+    res.json(finalRequest);
+  });
+
   app.put("/api/leave-requests/:id/decision", requireAuth, requireRole("admin", "manager"), async (req, res) => {
     const id = parseInt(req.params.id);
     const { status, managerNote } = req.body; // approved | rejected
@@ -578,7 +742,19 @@ export function registerRoutes(httpServer: Server, app: Express) {
     if (!request) return res.status(404).json({ error: "Not found" });
     if (request.status !== "pending") return res.status(400).json({ error: "Already processed" });
     const me = storage.getUserById(req.session.userId!)!;
-    if (me.role === "manager" && request.managerId !== me.id) {
+    const todayStr = new Date().toISOString().split("T")[0];
+
+    // Feature 2: Check if I can approve this request
+    let canApprove = me.role === "admin" || request.managerId === me.id;
+    if (!canApprove && me.role === "manager" && request.managerId) {
+      // Check if the request's manager delegated to me
+      const requestManager = storage.getUserById(request.managerId);
+      if (requestManager?.delegateApprovalsTo === me.id && requestManager?.delegateUntil && requestManager.delegateUntil >= todayStr) {
+        canApprove = true;
+      }
+    }
+
+    if (!canApprove) {
       return res.status(403).json({ error: "Not your request to approve" });
     }
 
@@ -641,6 +817,20 @@ export function registerRoutes(httpServer: Server, app: Express) {
     }
     const canceller = storage.getUserById(req.session.userId!)!;
     auditLog({ actorId: canceller.id, actorName: `${canceller.firstName} ${canceller.lastName}`, targetUserId: request.userId, targetUserName: `${canceller.firstName} ${canceller.lastName}`, eventType: "leave_cancelled", summary: `${canceller.firstName} ${canceller.lastName} cancelled ${request.leaveType === "home_office" ? "home office" : request.leaveType} request (${request.days} day${request.days !== 1 ? "s" : ""})`, detail: { leaveType: request.leaveType, startDate: request.startDate, endDate: request.endDate, days: request.days } });
+
+    // Feature 6: Send cancellation email to manager for annual leave
+    if (request.managerId && request.leaveType === "annual") {
+      const mgr = storage.getUserById(request.managerId);
+      const emp = storage.getUserById(request.userId)!;
+      if (mgr) {
+        try {
+          await sendCancellationEmail(mgr.email, mgr.firstName, `${emp.firstName} ${emp.lastName}`, request.startDate, request.endDate, request.days);
+        } catch (e) {
+          console.error(e);
+        }
+      }
+    }
+
     res.json({ ok: true });
   });
 
@@ -685,11 +875,163 @@ export function registerRoutes(httpServer: Server, app: Express) {
     res.json(entries);
   });
 
+  // Feature 5: Document attachments — upload
+  app.post("/api/leave-requests/:id/attachment", requireAuth, async (req, res) => {
+    const id = parseInt(req.params.id);
+    const { fileName, mimeType, dataBase64 } = req.body;
+    const request = storage.getLeaveRequestById(id);
+    if (!request) return res.status(404).json({ error: "Leave request not found" });
+
+    const me = storage.getUserById(req.session.userId!)!;
+    const canUpload = me.id === request.userId || me.role === "admin" || me.role === "manager";
+    if (!canUpload) return res.status(403).json({ error: "Forbidden" });
+
+    if (!dataBase64) return res.status(400).json({ error: "Missing dataBase64" });
+
+    // Max 10MB check
+    if (dataBase64.length > 14_000_000) {
+      return res.status(413).json({ error: "File too large (max 10MB)" });
+    }
+
+    // Decode and save
+    const buffer = Buffer.from(dataBase64, "base64");
+    const sanitized = fileName.replace(/[^a-zA-Z0-9._-]/g, "_");
+    const filePath = path.join(ATTACHMENTS_DIR, `${id}_${sanitized}`);
+
+    try {
+      fs.writeFileSync(filePath, buffer);
+      storage.updateLeaveRequest(id, { attachmentPath: filePath, attachmentName: fileName });
+      res.json({ ok: true, fileName });
+    } catch (e) {
+      console.error(e);
+      res.status(500).json({ error: "Failed to save attachment" });
+    }
+  });
+
+  // Feature 5: Document attachments — download
+  app.get("/api/leave-requests/:id/attachment", requireAuth, (req, res) => {
+    const id = parseInt(req.params.id);
+    const request = storage.getLeaveRequestById(id);
+    if (!request) return res.status(404).json({ error: "Leave request not found" });
+
+    if (!request.attachmentPath || !request.attachmentName) {
+      return res.status(404).json({ error: "No attachment" });
+    }
+
+    const me = storage.getUserById(req.session.userId!)!;
+    const canDownload = me.id === request.userId || me.role === "admin" || me.role === "manager";
+    if (!canDownload) return res.status(403).json({ error: "Forbidden" });
+
+    if (!fs.existsSync(request.attachmentPath)) {
+      return res.status(404).json({ error: "Attachment file not found" });
+    }
+
+    // Detect MIME type from extension
+    const ext = path.extname(request.attachmentName).toLowerCase();
+    const mimeTypes: Record<string, string> = {
+      ".pdf": "application/pdf",
+      ".jpg": "image/jpeg",
+      ".jpeg": "image/jpeg",
+      ".png": "image/png",
+      ".doc": "application/msword",
+      ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    };
+    const contentType = mimeTypes[ext] || "application/octet-stream";
+
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Content-Disposition", `attachment; filename="${request.attachmentName}"`);
+    try {
+      res.send(fs.readFileSync(request.attachmentPath));
+    } catch (e) {
+      console.error(e);
+      res.status(500).json({ error: "Failed to read attachment" });
+    }
+  });
+
+  // Feature 3: Payroll export (admin/manager only)
+  app.get("/api/reports/payroll", requireAuth, requireRole("admin", "manager"), (req, res) => {
+    const year = parseInt(req.query.year as string);
+    const month = req.query.month ? parseInt(req.query.month as string) : undefined;
+
+    if (!year || isNaN(year)) {
+      return res.status(400).json({ error: "Missing or invalid year parameter" });
+    }
+
+    const me = storage.getUserById(req.session.userId!)!;
+    const allRequests = storage.getAllLeaveRequests();
+    let filtered = allRequests.filter((r) => r.status === "approved" && r.year === year);
+
+    if (month && !isNaN(month)) {
+      filtered = filtered.filter((r) => {
+        const startMonth = new Date(r.startDate).getMonth() + 1;
+        const endMonth = new Date(r.endDate).getMonth() + 1;
+        return startMonth === month || endMonth === month || (startMonth < month && endMonth > month);
+      });
+    }
+
+    if (me.role === "manager") {
+      // Manager only sees their team
+      const teamMembers = storage.getActiveUsers().filter((u) => u.managerId === me.id);
+      const teamIds = teamMembers.map((u) => u.id);
+      filtered = filtered.filter((r) => teamIds.includes(r.userId));
+    }
+
+    const allUsers = storage.getAllUsers();
+    const rows = [["Employee Name", "Email", "Country", "Department", "Leave Type", "Start Date", "End Date", "Days", "Status", "Note"]];
+
+    for (const r of filtered) {
+      const u = allUsers.find((user) => user.id === r.userId);
+      rows.push([
+        `${u?.firstName || ""} ${u?.lastName || ""}`,
+        u?.email || "",
+        u?.country || "",
+        u?.department || "",
+        r.leaveType,
+        r.startDate,
+        r.endDate,
+        String(r.days),
+        r.status,
+        r.note || "",
+      ]);
+    }
+
+    const csv = rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
+
+    res.setHeader("Content-Type", "text/csv");
+    const filename = month ? `payroll_${year}_${String(month).padStart(2, "0")}.csv` : `payroll_${year}.csv`;
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.send(csv);
+  });
+
   // ── Public Holidays (read-only for front-end) ────────────────────────────────
   app.get("/api/holidays", requireAuth, (req, res) => {
     const year = parseInt(req.query.year as string) || new Date().getFullYear();
     const country = req.query.country as string || "CZ";
     res.json(storage.getPublicHolidays(country, year));
+  });
+
+  // Feature 1: Overlap warnings — check for colleagues on leave during requested period
+  app.get("/api/leave-requests/overlap", requireAuth, (req, res) => {
+    const { startDate, endDate } = req.query;
+    if (!startDate || !endDate) return res.status(400).json({ error: "Missing startDate or endDate" });
+    const me = storage.getUserById(req.session.userId!)!;
+    const all = storage.getAllLeaveRequests()
+      .filter((r) => r.userId !== me.id && (r.status === "approved" || r.status === "pending"));
+    const overlapping = all.filter((r) => {
+      return r.startDate <= (endDate as string) && r.endDate >= (startDate as string);
+    });
+    const activeUsers = storage.getActiveUsers();
+    const result = overlapping.map((r) => {
+      const u = activeUsers.find((user) => user.id === r.userId);
+      return {
+        firstName: u?.firstName || "Unknown",
+        lastName: u?.lastName || "User",
+        leaveType: r.leaveType,
+        startDate: r.startDate,
+        endDate: r.endDate,
+      };
+    });
+    res.json(result);
   });
 
   // ── Team calendar (all approved + pending leaves) ────────────────────────────
@@ -805,4 +1147,46 @@ export function registerRoutes(httpServer: Server, app: Express) {
   storage.updateUser(marcoId, { managerId: charlesId });
 
   console.log("[init] Team seed complete");
+
+  // Feature 6: Weekly digest scheduler — runs every 24h, sends on Mondays
+  function scheduleWeeklyDigest() {
+    setInterval(async () => {
+      const now = new Date();
+      if (now.getDay() !== 1) return; // Monday only
+      const todayStr = now.toISOString().split("T")[0];
+      const in14 = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+      const allLeave = storage.getAllLeaveRequests().filter((r) => r.status === "approved" && r.startDate >= todayStr && r.startDate <= in14);
+      const activeUsers = storage.getActiveUsers();
+
+      // Group by manager
+      const managerMap = new Map<number, typeof allLeave>();
+      allLeave.forEach((r) => {
+        if (r.managerId) {
+          if (!managerMap.has(r.managerId)) managerMap.set(r.managerId, []);
+          managerMap.get(r.managerId)!.push(r);
+        }
+      });
+
+      for (const [managerId, leaves] of managerMap) {
+        const mgr = storage.getUserById(managerId);
+        if (!mgr) continue;
+        const upcoming = leaves.map((r) => {
+          const u = activeUsers.find((u) => u.id === r.userId);
+          return {
+            name: u ? `${u.firstName} ${u.lastName}` : `User ${r.userId}`,
+            leaveType: r.leaveType,
+            startDate: r.startDate,
+            endDate: r.endDate,
+            days: r.days,
+          };
+        });
+        try {
+          await sendWeeklyDigestEmail(mgr.email, mgr.firstName, upcoming);
+        } catch (e) {
+          console.error(e);
+        }
+      }
+    }, 24 * 60 * 60 * 1000).unref();
+  }
+  scheduleWeeklyDigest();
 }

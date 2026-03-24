@@ -10,7 +10,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { UserPlus, Copy, CheckCircle2, Edit2, UserX, Link2, ShieldCheck, Clock, Search } from "lucide-react";
+import { UserPlus, Copy, CheckCircle2, Edit2, UserX, Link2, ShieldCheck, Clock, Search, CalendarPlus } from "lucide-react";
+import { useAuth } from "@/contexts/AuthContext";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 
 // "none" is used as sentinel for Select — avoids wouter treating value="" as /# route
@@ -185,6 +186,7 @@ function UserFormFields({
 
 export default function PeoplePage() {
   const { toast } = useToast();
+  const { user: currentUser } = useAuth();
 
   const [inviteOpen, setInviteOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
@@ -202,6 +204,9 @@ export default function PeoplePage() {
   const [editAllowance, setEditAllowance] = useState<{
     usedDays: string; pendingDays: string; totalDays: string; carriedOverDays: string;
   } | null>(null);
+  // Feature 7: On-behalf leave submission
+  const [onBehalfTarget, setOnBehalfTarget] = useState<User | null>(null);
+  const [onBehalfForm, setOnBehalfForm] = useState({ startDate: "", endDate: "", leaveType: "sick", note: "", halfDay: false });
 
   const emptyInvite = {
     email: "", firstName: "", lastName: "", role: "employee",
@@ -330,6 +335,31 @@ export default function PeoplePage() {
     },
   });
 
+  // Feature 7: On-behalf leave submission
+  const onBehalfMutation = useMutation({
+    mutationFn: async () => {
+      if (!onBehalfTarget) return;
+      const res = await apiRequest("POST", "/api/leave-requests/on-behalf", {
+        userId: onBehalfTarget.id,
+        startDate: onBehalfForm.startDate,
+        endDate: onBehalfForm.halfDay ? onBehalfForm.startDate : onBehalfForm.endDate,
+        leaveType: onBehalfForm.leaveType,
+        note: onBehalfForm.note || null,
+        halfDay: onBehalfForm.halfDay,
+      });
+      if (!res.ok) { const e = await res.json(); throw new Error(e.error); }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/leave-requests"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/allowances"] });
+      toast({ title: "Leave logged successfully" });
+      setOnBehalfTarget(null);
+      setOnBehalfForm({ startDate: "", endDate: "", leaveType: "sick", note: "", halfDay: false });
+    },
+    onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
+  });
+
   // Sync allowance data into edit form when it loads
   useEffect(() => {
     if (editUserAllowanceData && editOpen) {
@@ -452,6 +482,16 @@ export default function PeoplePage() {
                       </div>
                       {/* Action buttons — always right-aligned, never wrapping to new line */}
                       <div className="flex gap-0.5 flex-shrink-0 items-center">
+                        {(currentUser?.role === "admin" || currentUser?.role === "manager") && (
+                          <Button
+                            variant="ghost" size="sm"
+                            className="text-muted-foreground hover:text-primary h-8 w-8 p-0"
+                            onClick={(e) => { e.preventDefault(); e.stopPropagation(); setOnBehalfTarget(u); }}
+                            title="Log leave for this person"
+                          >
+                            <CalendarPlus size={15} />
+                          </Button>
+                        )}
                         {u.inviteToken && (
                           <Button variant="outline" size="sm" onClick={() => copyLink(u.inviteToken!)} data-testid={`button-copy-${u.id}`} className="hidden sm:flex">
                             {copied ? <CheckCircle2 size={13} className="text-green-500 mr-1" /> : <Copy size={13} className="mr-1" />}
@@ -695,6 +735,75 @@ export default function PeoplePage() {
                 {editMutation.isPending ? "Saving…" : "Save changes"}
               </Button>
             </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Feature 7: On-behalf leave submission dialog */}
+      <Dialog open={!!onBehalfTarget} onOpenChange={(o) => !o && setOnBehalfTarget(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Log Leave — {onBehalfTarget?.firstName} {onBehalfTarget?.lastName}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Leave type</Label>
+              <Select value={onBehalfForm.leaveType} onValueChange={(v) => setOnBehalfForm((f) => ({ ...f, leaveType: v }))}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="sick">Sick Leave</SelectItem>
+                  <SelectItem value="annual">Annual Leave</SelectItem>
+                  <SelectItem value="home_office">Home Office</SelectItem>
+                  <SelectItem value="unpaid">Unpaid Leave</SelectItem>
+                  <SelectItem value="other">Other</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Start date</Label>
+                <input type="date" className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" value={onBehalfForm.startDate} onChange={(e) => setOnBehalfForm((f) => ({ ...f, startDate: e.target.value }))} />
+              </div>
+              {!onBehalfForm.halfDay && (
+                <div className="space-y-2">
+                  <Label>End date</Label>
+                  <input type="date" className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" value={onBehalfForm.endDate} onChange={(e) => setOnBehalfForm((f) => ({ ...f, endDate: e.target.value }))} />
+                </div>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                role="switch"
+                aria-checked={onBehalfForm.halfDay}
+                onClick={() => setOnBehalfForm((f) => ({ ...f, halfDay: !f.halfDay }))}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${onBehalfForm.halfDay ? "bg-primary" : "bg-muted-foreground/30"}`}
+              >
+                <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${onBehalfForm.halfDay ? "translate-x-6" : "translate-x-1"}`} />
+              </button>
+              <Label className="cursor-pointer select-none" onClick={() => setOnBehalfForm((f) => ({ ...f, halfDay: !f.halfDay }))}>
+                Half day
+              </Label>
+            </div>
+            <div className="space-y-2">
+              <Label>Note (optional)</Label>
+              <input
+                type="text"
+                placeholder="Add any details..."
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                value={onBehalfForm.note}
+                onChange={(e) => setOnBehalfForm((f) => ({ ...f, note: e.target.value }))}
+              />
+            </div>
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="outline" onClick={() => setOnBehalfTarget(null)}>Cancel</Button>
+            <Button
+              onClick={() => onBehalfMutation.mutate()}
+              disabled={onBehalfMutation.isPending || !onBehalfForm.startDate || (!onBehalfForm.halfDay && !onBehalfForm.endDate)}
+            >
+              {onBehalfMutation.isPending ? "Logging..." : "Log Leave"}
+            </Button>
           </div>
         </DialogContent>
       </Dialog>

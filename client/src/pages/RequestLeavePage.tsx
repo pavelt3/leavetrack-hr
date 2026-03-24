@@ -32,10 +32,17 @@ export default function RequestLeavePage() {
   const [leaveType, setLeaveType] = useState("annual");
   const [halfDay, setHalfDay] = useState(false);
   const [note, setNote] = useState("");
+  const [attachment, setAttachment] = useState<{ fileName: string; mimeType: string; dataBase64: string } | null>(null);
 
   const { data: allowance } = useQuery<any>({ queryKey: [`/api/allowances/me?year=${year}`] });
   const { data: holidays = [] } = useQuery<any[]>({
     queryKey: [`/api/holidays?year=${year}&country=${user?.country}`],
+  });
+
+  // Feature 1: Query for overlap warnings
+  const { data: overlaps = [] } = useQuery<any[]>({
+    queryKey: [`/api/leave-requests/overlap?startDate=${startDate}&endDate=${endDate}`],
+    enabled: !!(startDate && endDate && !halfDay && estimateDays(startDate, endDate) > 0),
   });
 
   const holidaySet = new Set(holidays.map((h: any) => h.date));
@@ -95,7 +102,17 @@ export default function RequestLeavePage() {
     mutationFn: async (data: any) => {
       const res = await apiRequest("POST", "/api/leave-requests", data);
       if (!res.ok) { const err = await res.json(); throw new Error(err.error); }
-      return res.json();
+      const leaveRequest = await res.json();
+
+      // Feature 5: Upload attachment if provided
+      if (attachment) {
+        const attachRes = await apiRequest("POST", `/api/leave-requests/${leaveRequest.id}/attachment`, attachment);
+        if (!attachRes.ok) {
+          console.error("Failed to upload attachment");
+        }
+      }
+
+      return leaveRequest;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/leave-requests/me"] });
@@ -255,6 +272,50 @@ export default function RequestLeavePage() {
                 </p>
               </div>
             )}
+
+            {/* Feature 1: Overlap warnings */}
+            {overlaps.length > 0 && (
+              <div className="rounded-md border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/40 px-3 py-2.5 text-xs">
+                <p className="font-medium text-amber-800 dark:text-amber-300 mb-1">
+                  ⚠ {overlaps.length} colleague{overlaps.length !== 1 ? "s" : ""} also off during this period:
+                </p>
+                <p className="text-amber-700 dark:text-amber-400">
+                  {overlaps.map((o: any) => `${o.firstName} ${o.lastName}`).join(" · ")}
+                </p>
+              </div>
+            )}
+
+            {/* Feature 5: File attachment */}
+            <div className="space-y-2">
+              <Label htmlFor="attachment">Supporting document <span className="text-muted-foreground font-normal">(optional — e.g. doctor's note)</span></Label>
+              <input
+                id="attachment"
+                type="file"
+                accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (!file) {
+                    setAttachment(null);
+                    return;
+                  }
+                  const reader = new FileReader();
+                  reader.onload = (ev) => {
+                    const dataUrl = ev.target?.result as string;
+                    const base64 = dataUrl.split(",")[1];
+                    setAttachment({
+                      fileName: file.name,
+                      mimeType: file.type,
+                      dataBase64: base64,
+                    });
+                  };
+                  reader.readAsDataURL(file);
+                }}
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm file:border-0 file:bg-transparent file:text-sm file:font-medium"
+              />
+              {attachment && (
+                <p className="text-xs text-muted-foreground">📎 {attachment.fileName} ready to attach</p>
+              )}
+            </div>
 
             <div className="space-y-2">
               <Label htmlFor="note">Note (optional)</Label>

@@ -165,6 +165,13 @@ export default function MyRequestsPage() {
                       Manager note: {r.managerNote}
                     </p>
                   )}
+                  {/* Feature 5: Attachment download link */}
+                  {r.attachmentName && (
+                    <a href={`/api/leave-requests/${r.id}/attachment`} target="_blank" rel="noopener noreferrer"
+                       className="text-xs text-primary hover:underline flex items-center gap-1 w-fit">
+                      📎 {r.attachmentName}
+                    </a>
+                  )}
                 </div>
                 {(r.status === "pending" || (r.status === "approved" && r.startDate >= today)) && (
                   <Button

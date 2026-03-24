@@ -20,6 +20,11 @@ export const users = sqliteTable("users", {
   createdAt: text("created_at").notNull().default(new Date().toISOString()),
   lastLoginAt: text("last_login_at"), // ISO datetime of last successful login
   startDate: text("start_date"), // employment start date YYYY-MM-DD (for pro-rata)
+  phone: text("phone"), // Feature 4: phone number
+  emergencyContact: text("emergency_contact"), // Feature 4: emergency contact name
+  emergencyContactPhone: text("emergency_contact_phone"), // Feature 4: emergency contact phone
+  delegateApprovalsTo: integer("delegate_approvals_to"), // Feature 2: delegate approvals to this user
+  delegateUntil: text("delegate_until"), // Feature 2: date until delegation is active (YYYY-MM-DD)
 });
 
 export const insertUserSchema = createInsertSchema(users).omit({ id: true, createdAt: true, passwordHash: true });
@@ -61,6 +66,8 @@ export const leaveRequests = sqliteTable("leave_requests", {
   year: integer("year").notNull(),
   createdAt: text("created_at").notNull().default(new Date().toISOString()),
   updatedAt: text("updated_at").notNull().default(new Date().toISOString()),
+  attachmentPath: text("attachment_path"), // Feature 5: path to attachment file
+  attachmentName: text("attachment_name"), // Feature 5: original filename
 });
 
 export const insertLeaveRequestSchema = createInsertSchema(leaveRequests).omit({

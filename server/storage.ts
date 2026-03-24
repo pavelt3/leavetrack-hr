@@ -90,6 +90,16 @@ sqlite.exec(`
 try { sqlite.exec(`ALTER TABLE users ADD COLUMN last_login_at TEXT`); } catch (_) { /* already exists */ }
 try { sqlite.exec(`ALTER TABLE leave_requests ADD COLUMN half_day INTEGER NOT NULL DEFAULT 0`); } catch (_) { /* already exists */ }
 try { sqlite.exec(`ALTER TABLE users ADD COLUMN start_date TEXT`); } catch (_) { /* already exists */ }
+// Feature 4: Employee profile fields
+try { sqlite.exec(`ALTER TABLE users ADD COLUMN phone TEXT`); } catch (_) { /* already exists */ }
+try { sqlite.exec(`ALTER TABLE users ADD COLUMN emergency_contact TEXT`); } catch (_) { /* already exists */ }
+try { sqlite.exec(`ALTER TABLE users ADD COLUMN emergency_contact_phone TEXT`); } catch (_) { /* already exists */ }
+// Feature 2: Approval delegation
+try { sqlite.exec(`ALTER TABLE users ADD COLUMN delegate_approvals_to INTEGER`); } catch (_) { /* already exists */ }
+try { sqlite.exec(`ALTER TABLE users ADD COLUMN delegate_until TEXT`); } catch (_) { /* already exists */ }
+// Feature 5: Document attachments
+try { sqlite.exec(`ALTER TABLE leave_requests ADD COLUMN attachment_path TEXT`); } catch (_) { /* already exists */ }
+try { sqlite.exec(`ALTER TABLE leave_requests ADD COLUMN attachment_name TEXT`); } catch (_) { /* already exists */ }
 // Clear stale invite tokens for users who have already logged in (seeding left tokens on active accounts)
 try { sqlite.exec(`UPDATE users SET invite_token = NULL, invite_expiry = NULL WHERE last_login_at IS NOT NULL AND invite_token IS NOT NULL`); } catch (_) {}
 // Audit log table (created via CREATE TABLE IF NOT EXISTS above, but add as migration for existing DBs)

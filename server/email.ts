@@ -172,3 +172,48 @@ export async function sendReminderEmail(
     </div>`,
   ));
 }
+
+// Feature 6: Cancellation email
+export async function sendCancellationEmail(
+  managerEmail: string, managerName: string,
+  employeeName: string, startDate: string, endDate: string, days: number,
+) {
+  await safeSend(() => sendGraphEmail(
+    managerEmail,
+    `Leave request cancelled – ${employeeName}`,
+    `<div style="font-family:sans-serif;max-width:520px;margin:auto">
+      <h2 style="color:#b45309">Leave Request Cancelled</h2>
+      <p>Hi ${managerName},</p>
+      <p><strong>${employeeName}</strong> has cancelled their leave request:</p>
+      <table style="border-collapse:collapse;width:100%;margin:16px 0">
+        <tr><td style="padding:8px;background:#f5f5f5;font-weight:bold">Period</td><td style="padding:8px">${startDate} → ${endDate}</td></tr>
+        <tr><td style="padding:8px;background:#f5f5f5;font-weight:bold">Working days</td><td style="padding:8px">${days}</td></tr>
+      </table>
+      <p>No action required.</p>
+    </div>`,
+  ));
+}
+
+// Feature 6: Weekly digest email
+export async function sendWeeklyDigestEmail(
+  managerEmail: string, managerName: string,
+  upcomingLeaves: Array<{name: string; leaveType: string; startDate: string; endDate: string; days: number}>,
+) {
+  if (upcomingLeaves.length === 0) return;
+  const rows = upcomingLeaves.map(l =>
+    `<tr><td style="padding:8px">${l.name}</td><td style="padding:8px;text-transform:capitalize">${l.leaveType.replace(/_/g, ' ')}</td><td style="padding:8px">${l.startDate} → ${l.endDate}</td><td style="padding:8px">${l.days}d</td></tr>`
+  ).join('');
+  await safeSend(() => sendGraphEmail(
+    managerEmail,
+    `Weekly leave digest – ${upcomingLeaves.length} upcoming absence${upcomingLeaves.length !== 1 ? 's' : ''}`,
+    `<div style="font-family:sans-serif;max-width:520px;margin:auto">
+      <h2 style="color:#1a6b72">Weekly Leave Digest</h2>
+      <p>Hi ${managerName}, here are upcoming approved absences for your team in the next 14 days:</p>
+      <table style="border-collapse:collapse;width:100%;margin:16px 0">
+        <tr style="background:#f5f5f5"><th style="padding:8px;text-align:left">Name</th><th style="padding:8px;text-align:left">Type</th><th style="padding:8px;text-align:left">Dates</th><th style="padding:8px;text-align:left">Days</th></tr>
+        ${rows}
+      </table>
+      <p><a href="${APP_URL}" style="background:#1a6b72;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;display:inline-block">View Team Calendar →</a></p>
+    </div>`,
+  ));
+}

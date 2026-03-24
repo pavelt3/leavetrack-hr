@@ -19,6 +19,66 @@ export default function SettingsPage() {
   const { user } = useAuth();
   const { toast } = useToast();
 
+  // Feature 4: Profile editing
+  const [profileForm, setProfileForm] = useState({ firstName: user?.firstName || "", lastName: user?.lastName || "", phone: user?.phone || "", emergencyContact: user?.emergencyContact || "", emergencyContactPhone: user?.emergencyContactPhone || "" });
+  const profileMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("PUT", "/api/users/me/profile", profileForm);
+      if (!res.ok) { const e = await res.json(); throw new Error(e.error); }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/auth/me"] });
+      toast({ title: "Profile updated" });
+    },
+    onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
+  });
+
+  // Feature 2: Approval delegation
+  const { data: delegationData } = useQuery<any>({
+    queryKey: ["/api/users/me/delegation"],
+  });
+  const [delegateToId, setDelegateToId] = useState<string>("");
+  const [delegateUntil, setDelegateUntil] = useState<string>("");
+  const { data: allUsersForDelegate = [] } = useQuery<any[]>({
+    queryKey: ["/api/users/all"],
+  });
+  const delegationMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("PUT", "/api/users/me/delegation", {
+        delegateToId: delegateToId ? parseInt(delegateToId) : null,
+        delegateUntil: delegateUntil || null,
+      });
+      if (!res.ok) { const e = await res.json(); throw new Error(e.error); }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/users/me/delegation"] });
+      toast({ title: "Delegation updated" });
+      setDelegateToId("");
+      setDelegateUntil("");
+    },
+    onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
+  });
+
+  // Feature 3: Payroll export
+  const [reportYear, setReportYear] = useState(String(new Date().getFullYear()));
+  const [reportMonth, setReportMonth] = useState("");
+  const payrollMutation = useMutation({
+    mutationFn: async () => {
+      const url = `/api/reports/payroll?year=${reportYear}${reportMonth ? `&month=${reportMonth}` : ""}`;
+      const res = await apiRequest("GET", url);
+      const blob = await res.blob();
+      const urlObj = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = urlObj;
+      a.download = reportMonth ? `payroll_${reportYear}_${String(reportMonth).padStart(2, "0")}.csv` : `payroll_${reportYear}.csv`;
+      a.click();
+      URL.revokeObjectURL(urlObj);
+    },
+    onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
+  });
+
   // Change password
   const [pwForm, setPwForm] = useState({ current: "", newPw: "", confirm: "" });
   const pwMutation = useMutation({
@@ -98,19 +158,85 @@ export default function SettingsPage() {
         </TabsList>
 
         <TabsContent value="account" className="mt-6 space-y-5">
-          {/* Profile card */}
+          {/* Feature 4: Editable Profile card */}
           <Card>
             <CardHeader><CardTitle className="text-base">Profile</CardTitle></CardHeader>
-            <CardContent className="space-y-3">
-              <div className="grid grid-cols-2 gap-4 text-sm">
-                <div><span className="text-muted-foreground">Name</span><p className="font-medium mt-0.5">{user?.firstName} {user?.lastName}</p></div>
-                <div><span className="text-muted-foreground">Email</span><p className="font-medium mt-0.5">{user?.email}</p></div>
-                <div><span className="text-muted-foreground">Role</span><p className="font-medium capitalize mt-0.5">{user?.role}</p></div>
-                <div><span className="text-muted-foreground">Country</span><p className="font-medium mt-0.5">{COUNTRY_FLAG[user?.country || ""] || ""} {user?.country}</p></div>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>First name</Label>
+                  <Input value={profileForm.firstName} onChange={(e) => setProfileForm((f) => ({ ...f, firstName: e.target.value }))} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Last name</Label>
+                  <Input value={profileForm.lastName} onChange={(e) => setProfileForm((f) => ({ ...f, lastName: e.target.value }))} />
+                </div>
               </div>
-              <Alert className="border-muted">
-                <Info size={14} /><AlertDescription className="text-xs">To update your profile details, contact your administrator.</AlertDescription>
-              </Alert>
+              <div className="space-y-2">
+                <Label>Phone</Label>
+                <Input type="tel" value={profileForm.phone} onChange={(e) => setProfileForm((f) => ({ ...f, phone: e.target.value }))} placeholder="Optional" />
+              </div>
+              <div className="space-y-2">
+                <Label>Emergency contact name</Label>
+                <Input value={profileForm.emergencyContact} onChange={(e) => setProfileForm((f) => ({ ...f, emergencyContact: e.target.value }))} placeholder="Optional" />
+              </div>
+              <div className="space-y-2">
+                <Label>Emergency contact phone</Label>
+                <Input type="tel" value={profileForm.emergencyContactPhone} onChange={(e) => setProfileForm((f) => ({ ...f, emergencyContactPhone: e.target.value }))} placeholder="Optional" />
+              </div>
+              <div className="text-sm text-muted-foreground space-y-1 pt-2">
+                <div><strong>Email:</strong> {user?.email}</div>
+                <div><strong>Role:</strong> {user?.role}</div>
+                <div><strong>Country:</strong> {COUNTRY_FLAG[user?.country || ""] || ""} {user?.country}</div>
+                <p className="text-xs italic pt-1">Contact admin to change email, role, or country.</p>
+              </div>
+              <Button disabled={profileMutation.isPending} onClick={() => profileMutation.mutate()}>
+                {profileMutation.isPending ? "Saving..." : "Save Profile"}
+              </Button>
+            </CardContent>
+          </Card>
+
+          {/* Feature 2: Approval Delegation */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Approval Delegation</CardTitle>
+              <CardDescription>While you are away, delegate your leave approvals to a colleague.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {delegationData?.delegateTo ? (
+                <div className="space-y-4">
+                  <div className="rounded-md bg-green-50 dark:bg-green-950/40 border border-green-200 dark:border-green-800 px-3 py-2">
+                    <p className="text-sm text-green-800 dark:text-green-300">
+                      <CheckCircle2 size={14} className="inline mr-1" />
+                      Your approvals are delegated to <strong>{delegationData.delegateTo.firstName} {delegationData.delegateTo.lastName}</strong> until {delegationData.delegateUntil}
+                    </p>
+                  </div>
+                  <Button variant="outline" onClick={() => { setDelegateToId(""); setDelegateUntil(""); delegationMutation.mutate(); }}>
+                    Clear Delegation
+                  </Button>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label>Delegate to</Label>
+                    <Select value={delegateToId} onValueChange={setDelegateToId}>
+                      <SelectTrigger><SelectValue placeholder="Select colleague" /></SelectTrigger>
+                      <SelectContent>
+                        {(allUsersForDelegate as any[]).filter((u: any) => u.id !== user?.id && u.isActive).map((u: any) => (
+                          <SelectItem key={u.id} value={String(u.id)}>{u.firstName} {u.lastName}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Until (date)</Label>
+                    <input type="date" className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" value={delegateUntil} onChange={(e) => setDelegateUntil(e.target.value)} />
+                  </div>
+                  <Button disabled={delegationMutation.isPending || !delegateToId || !delegateUntil} onClick={() => delegationMutation.mutate()}>
+                    {delegationMutation.isPending ? "Saving..." : "Set Delegation"}
+                  </Button>
+                </div>
+              )}
             </CardContent>
           </Card>
 
@@ -133,6 +259,44 @@ export default function SettingsPage() {
 
         {user?.role === "admin" && (
           <TabsContent value="admin" className="mt-6 space-y-5">
+            {/* Feature 3: Payroll Export */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Payroll Export</CardTitle>
+                <CardDescription>Download approved leave data as CSV for payroll processing</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>Year</Label>
+                    <Select value={reportYear} onValueChange={setReportYear}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {[String(new Date().getFullYear() - 1), String(new Date().getFullYear()), String(new Date().getFullYear() + 1)].map((y) => (
+                          <SelectItem key={y} value={y}>{y}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Month (optional)</Label>
+                    <Select value={reportMonth} onValueChange={setReportMonth}>
+                      <SelectTrigger><SelectValue placeholder="All months" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="">All months</SelectItem>
+                        {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((m) => (
+                          <SelectItem key={m} value={String(m)}>{new Date(2024, m - 1).toLocaleString("en", { month: "long" })}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <Button disabled={payrollMutation.isPending} onClick={() => payrollMutation.mutate()}>
+                  {payrollMutation.isPending ? "Downloading..." : "Download CSV"}
+                </Button>
+              </CardContent>
+            </Card>
+
             {/* Carry-over */}
             <Card>
               <CardHeader>

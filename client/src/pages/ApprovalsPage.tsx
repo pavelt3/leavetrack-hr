@@ -113,6 +113,12 @@ export default function ApprovalsPage() {
                           {r.employee.department}
                         </span>
                       )}
+                      {/* Feature 2: Delegation badge */}
+                      {r.isDelegated && r.delegatedFrom && (
+                        <span className="text-xs bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-400 px-1.5 py-0.5 rounded">
+                          via {r.delegatedFrom.firstName} {r.delegatedFrom.lastName}
+                        </span>
+                      )}
                     </div>
                     <div className="flex items-center gap-4 text-sm flex-wrap">
                       <span className="flex items-center gap-1.5 font-medium">
@@ -129,6 +135,13 @@ export default function ApprovalsPage() {
                       <p className="text-sm text-muted-foreground italic bg-muted px-3 py-1.5 rounded-md">
                         "{r.note}"
                       </p>
+                    )}
+                    {/* Feature 5: Attachment download link */}
+                    {r.attachmentName && (
+                      <a href={`/api/leave-requests/${r.id}/attachment`} target="_blank" rel="noopener noreferrer"
+                         className="text-xs text-primary hover:underline flex items-center gap-1 w-fit">
+                        📎 {r.attachmentName}
+                      </a>
                     )}
                     <div className="flex items-center gap-4 flex-wrap">
                       <p className="text-xs text-muted-foreground">
