@@ -4,3 +4,7 @@ dist/
 *.db-shm
 *.db-wal
 .env
+# Playwright
+.auth/
+playwright-report/
+test-results/
