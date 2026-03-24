@@ -12,6 +12,14 @@ interface AuthUser {
   country: string;
   department: string | null;
   jobTitle: string | null;
+  phone: string | null;
+  emergencyContact: string | null;
+  emergencyContactPhone: string | null;
+  delegateApprovalsTo: number | null;
+  delegateUntil: string | null;
+  isActive: boolean;
+  startDate: string | null;
+  lastLoginAt: string | null;
 }
 
 interface AuthContextType {

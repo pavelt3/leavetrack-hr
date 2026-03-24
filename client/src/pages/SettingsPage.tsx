@@ -63,16 +63,17 @@ export default function SettingsPage() {
 
   // Feature 3: Payroll export
   const [reportYear, setReportYear] = useState(String(new Date().getFullYear()));
-  const [reportMonth, setReportMonth] = useState("");
+  const [reportMonth, setReportMonth] = useState("all");
   const payrollMutation = useMutation({
     mutationFn: async () => {
-      const url = `/api/reports/payroll?year=${reportYear}${reportMonth ? `&month=${reportMonth}` : ""}`;
+      const monthParam = reportMonth !== "all" ? `&month=${reportMonth}` : "";
+      const url = `/api/reports/payroll?year=${reportYear}${monthParam}`;
       const res = await apiRequest("GET", url);
       const blob = await res.blob();
       const urlObj = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = urlObj;
-      a.download = reportMonth ? `payroll_${reportYear}_${String(reportMonth).padStart(2, "0")}.csv` : `payroll_${reportYear}.csv`;
+      a.download = reportMonth !== "all" ? `payroll_${reportYear}_${String(reportMonth).padStart(2, "0")}.csv` : `payroll_${reportYear}.csv`;
       a.click();
       URL.revokeObjectURL(urlObj);
     },
@@ -283,7 +284,7 @@ export default function SettingsPage() {
                     <Select value={reportMonth} onValueChange={setReportMonth}>
                       <SelectTrigger><SelectValue placeholder="All months" /></SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="">All months</SelectItem>
+                        <SelectItem value="all">All months</SelectItem>
                         {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((m) => (
                           <SelectItem key={m} value={String(m)}>{new Date(2024, m - 1).toLocaleString("en", { month: "long" })}</SelectItem>
                         ))}
