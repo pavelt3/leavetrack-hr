@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 
-test.use({ storageState: ".auth/admin.json" });
+
 
 test.beforeEach(async ({ page }) => {
   await page.goto("/#/people");
@@ -15,8 +15,8 @@ test("people page lists all active team members", async ({ page }) => {
 test("search filters the member list", async ({ page }) => {
   await page.fill("input[placeholder*='Search']", "Karen");
   await expect(page.locator("text=Karen Biesuz")).toBeVisible();
-  // Others should not be visible
-  await expect(page.locator("text=Pavel Tyle")).not.toBeVisible();
+  // Sidebar always shows the logged-in user — scope check to main content only
+  await expect(page.locator("main").locator("text=Pavel Tyle")).not.toBeVisible();
 });
 
 test("leave history dialog opens and closes", async ({ page }) => {
