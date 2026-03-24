@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { UserPlus, Copy, CheckCircle2, Edit2, UserX, Link2, ShieldCheck, Clock, Search, CalendarPlus } from "lucide-react";
+import { UserPlus, Copy, CheckCircle2, Edit2, UserX, Link2, ShieldCheck, Clock, Search, CalendarPlus, History, Trash2 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 
@@ -47,6 +47,11 @@ interface User {
   inviteToken?: string | null;
   hasPassword?: boolean;
   lastLoginAt?: string | null;
+}
+
+interface LeaveEntry {
+  id: number; leaveType: string; startDate: string; endDate: string;
+  days: number; status: string; note: string | null; halfDay: boolean; year: number;
 }
 
 function UserFormFields({
@@ -208,6 +213,10 @@ export default function PeoplePage() {
   const [onBehalfTarget, setOnBehalfTarget] = useState<User | null>(null);
   const [onBehalfForm, setOnBehalfForm] = useState({ startDate: "", endDate: "", leaveType: "sick", note: "", halfDay: false });
 
+  // Admin: leave history dialog
+  const [leaveHistoryTarget, setLeaveHistoryTarget] = useState<User | null>(null);
+  const [deleteConfirmEntry, setDeleteConfirmEntry] = useState<LeaveEntry | null>(null);
+
   const emptyInvite = {
     email: "", firstName: "", lastName: "", role: "employee",
     country: "CZ", department: "", jobTitle: "", managerId: null, totalDays: "25",
@@ -360,6 +369,35 @@ export default function PeoplePage() {
     onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
 
+  // Admin: fetch leave history for selected user
+  const { data: leaveHistory = [], refetch: refetchHistory } = useQuery<LeaveEntry[]>({
+    queryKey: ["/api/leave-requests/all", leaveHistoryTarget?.id],
+    enabled: !!leaveHistoryTarget,
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/leave-requests/all");
+      const all = await res.json();
+      return (all as any[])
+        .filter((r: any) => r.userId === leaveHistoryTarget?.id && r.status !== "cancelled")
+        .sort((a: any, b: any) => b.startDate.localeCompare(a.startDate));
+    },
+  });
+
+  const deleteLeaveEntryMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const res = await apiRequest("DELETE", `/api/leave-requests/${id}`);
+      if (!res.ok) { const e = await res.json(); throw new Error(e.error); }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/leave-requests/all", leaveHistoryTarget?.id] });
+      queryClient.invalidateQueries({ queryKey: ["/api/allowances"] });
+      refetchHistory();
+      setDeleteConfirmEntry(null);
+      toast({ title: "Entry removed" });
+    },
+    onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
+  });
+
   // Sync allowance data into edit form when it loads
   useEffect(() => {
     if (editUserAllowanceData && editOpen) {
@@ -490,6 +528,16 @@ export default function PeoplePage() {
                             title="Log leave for this person"
                           >
                             <CalendarPlus size={15} />
+                          </Button>
+                        )}
+                        {currentUser?.role === "admin" && (
+                          <Button
+                            variant="ghost" size="sm"
+                            className="text-muted-foreground hover:text-primary h-8 w-8 p-0"
+                            onClick={(e) => { e.preventDefault(); e.stopPropagation(); setLeaveHistoryTarget(u); }}
+                            title="View & manage leave history"
+                          >
+                            <History size={15} />
                           </Button>
                         )}
                         {u.inviteToken && (
@@ -738,6 +786,90 @@ export default function PeoplePage() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* ── Admin: Leave History dialog ───────────────────────────────────────── */}
+      <Dialog open={!!leaveHistoryTarget} onOpenChange={(o) => { if (!o) setLeaveHistoryTarget(null); }}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Leave History — {leaveHistoryTarget?.firstName} {leaveHistoryTarget?.lastName}</DialogTitle>
+          </DialogHeader>
+          {leaveHistory.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-6 text-center">No leave entries found.</p>
+          ) : (
+            <div className="divide-y divide-border text-sm">
+              {leaveHistory.map((entry) => {
+                const typeLabel: Record<string, string> = {
+                  annual: "Annual", sick: "Sick", home_office: "Home Office",
+                  unpaid: "Unpaid", other: "Other",
+                };
+                const statusColor: Record<string, string> = {
+                  approved: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
+                  pending: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400",
+                  rejected: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
+                };
+                return (
+                  <div key={entry.id} className="flex items-center justify-between gap-3 py-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-medium">{typeLabel[entry.leaveType] ?? entry.leaveType}</span>
+                        <span className={`status-badge ${statusColor[entry.status] ?? "bg-gray-100 text-gray-600"}`}>{entry.status}</span>
+                        {entry.halfDay && <span className="status-badge bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">½ day</span>}
+                      </div>
+                      <div className="text-xs text-muted-foreground mt-0.5">
+                        {entry.startDate === entry.endDate ? entry.startDate : `${entry.startDate} – ${entry.endDate}`}
+                        {" · "}{entry.halfDay ? "0.5" : entry.days} day{entry.days !== 1 && !entry.halfDay ? "s" : ""}
+                        {entry.note && ` · "${entry.note}"`}
+                      </div>
+                    </div>
+                    <Button
+                      variant="ghost" size="sm"
+                      className="text-muted-foreground hover:text-destructive h-8 w-8 p-0 flex-shrink-0"
+                      onClick={() => setDeleteConfirmEntry(entry)}
+                      title="Remove this entry"
+                    >
+                      <Trash2 size={14} />
+                    </Button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          <div className="flex justify-end pt-2">
+            <Button variant="outline" onClick={() => setLeaveHistoryTarget(null)}>Close</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Delete entry confirmation ─────────────────────────────────────────── */}
+      <AlertDialog open={!!deleteConfirmEntry} onOpenChange={(o) => !o && setDeleteConfirmEntry(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove this entry?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteConfirmEntry && (
+                <>
+                  This will remove the <strong>{deleteConfirmEntry.leaveType}</strong> entry
+                  ({deleteConfirmEntry.startDate === deleteConfirmEntry.endDate
+                    ? deleteConfirmEntry.startDate
+                    : `${deleteConfirmEntry.startDate} – ${deleteConfirmEntry.endDate}`},
+                  {" "}{deleteConfirmEntry.halfDay ? "½" : deleteConfirmEntry.days} day{deleteConfirmEntry.days !== 1 ? "s" : ""})
+                  for <strong>{leaveHistoryTarget?.firstName} {leaveHistoryTarget?.lastName}</strong>.
+                  Allowance counters will be restored automatically. This action is logged.
+                </>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive hover:bg-destructive/90 text-white"
+              onClick={() => deleteConfirmEntry && deleteLeaveEntryMutation.mutate(deleteConfirmEntry.id)}
+            >
+              Remove entry
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Feature 7: On-behalf leave submission dialog */}
       <Dialog open={!!onBehalfTarget} onOpenChange={(o) => !o && setOnBehalfTarget(null)}>

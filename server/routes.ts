@@ -834,6 +834,48 @@ export function registerRoutes(httpServer: Server, app: Express) {
     res.json({ ok: true });
   });
 
+  // ── Admin: force-remove any leave request (admin only) ────────────────────────
+  // Admins can delete any leave regardless of date, status, or owner.
+  // Allowance counters are restored, and the action is written to the audit log.
+  app.delete("/api/leave-requests/:id", requireAuth, requireRole("admin"), (req, res) => {
+    const id = parseInt(req.params.id);
+    const request = storage.getLeaveRequestById(id);
+    if (!request) return res.status(404).json({ error: "Not found" });
+
+    const admin = storage.getUserById(req.session.userId!)!;
+    const targetUser = storage.getUserById(request.userId);
+    const targetName = targetUser ? `${targetUser.firstName} ${targetUser.lastName}` : `User #${request.userId}`;
+
+    // Restore allowance counters based on current status
+    if (request.leaveType === "annual") {
+      const allowance = storage.ensureAllowance(request.userId, request.year);
+      if (request.status === "pending") {
+        storage.updateAllowance(request.userId, request.year, {
+          pendingDays: Math.max(0, allowance.pendingDays - request.days),
+        });
+      } else if (request.status === "approved") {
+        storage.updateAllowance(request.userId, request.year, {
+          usedDays: Math.max(0, allowance.usedDays - request.days),
+        });
+      }
+    }
+
+    // Soft-delete: mark as cancelled (preserves record for audit trail)
+    storage.updateLeaveRequest(id, { status: "cancelled" });
+
+    auditLog({
+      actorId: admin.id,
+      actorName: `${admin.firstName} ${admin.lastName}`,
+      targetUserId: request.userId,
+      targetUserName: targetName,
+      eventType: "leave_admin_deleted",
+      summary: `${admin.firstName} ${admin.lastName} removed ${request.leaveType === "home_office" ? "home office" : request.leaveType} entry for ${targetName} (${request.days} day${request.days !== 1 ? "s" : ""}, ${request.startDate}–${request.endDate})`,
+      detail: { leaveType: request.leaveType, startDate: request.startDate, endDate: request.endDate, days: request.days, previousStatus: request.status },
+    });
+
+    res.json({ ok: true });
+  });
+
   // ── Test email (admin only — for verifying SMTP config) ───────────────────────
   app.post("/api/email/test", requireAuth, requireRole("admin"), async (req, res) => {
     const { to } = req.body;
@@ -866,6 +908,18 @@ export function registerRoutes(httpServer: Server, app: Express) {
       }
     }
     res.json({ sent, pendingCount: pending.length });
+  });
+
+  // ── Admin: full data reset (keeps users + public holidays) ──────────────────
+  // Clears all leave requests, allowances, carry-over log, audit log, and sessions.
+  // Requires a confirmation token in the body to prevent accidental calls.
+  app.post("/api/admin/reset-data", requireAuth, requireRole("admin"), (req, res) => {
+    const { confirm } = req.body;
+    if (confirm !== "RESET_ALL_DATA") {
+      return res.status(400).json({ error: "Send { confirm: 'RESET_ALL_DATA' } to confirm." });
+    }
+    storage.resetData();
+    res.json({ ok: true, message: "All leave data cleared. Users and public holidays retained." });
   });
 
   // ── Audit log (admin only) ─────────────────────────────────────────────────────────────────

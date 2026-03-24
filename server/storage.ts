@@ -269,6 +269,20 @@ class Storage implements IStorage {
       .limit(limit)
       .all() as AuditLogEntry[];
   }
+
+  /**
+   * Hard-reset all operational data while keeping users and public holidays.
+   * Clears: leave_requests, leave_allowances, carry_over_log, audit_log, sessions.
+   */
+  resetData() {
+    sqlite.exec(`
+      DELETE FROM leave_requests;
+      DELETE FROM leave_allowances;
+      DELETE FROM carry_over_log;
+      DELETE FROM audit_log;
+      DELETE FROM sessions;
+    `);
+  }
 }
 
 export const storage = new Storage();
